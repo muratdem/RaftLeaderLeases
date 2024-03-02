@@ -241,15 +241,5 @@ StateMachineSafety ==
 LinearizableReads == 
     latestRead = IF Cardinality(committed) = 0 THEN <<0,0>>
                  ELSE MaxCommitted(committed).entry[2]
-
---------------------------------------------------------------------------------
-
-\* State Constraint. Used for model checking only.
-CONSTANTS MaxTerm, MaxLogLen
-
-StateConstraint == \A s \in Server :
-                    /\ currentTerm[s] <= MaxTerm
-                    /\ Len(log[s]) <= MaxLogLen
-
-ServerSymmetry == Permutations(Server)                 
+ 
 =============================================================================
