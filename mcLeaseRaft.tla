@@ -2,11 +2,14 @@
 EXTENDS TLC, leaseRaft1
 
 \* State Constraint. Used for model checking only.
-CONSTANTS MaxTerm, MaxLogLen
+CONSTANTS MaxTerm, MaxLogLen, MaxClock
 
-StateConstraint == \A s \in Server :
-                    /\ currentTerm[s] <= MaxTerm
-                    /\ Len(log[s]) <= MaxLogLen
+StateConstraint == 
+    /\ clock < MaxClock
+    /\ \A s \in Server :
+        /\ currentTerm[s] <= MaxTerm
+        /\ Len(log[s]) <= MaxLogLen
+
 
 ServerSymmetry == Permutations(Server)      
 

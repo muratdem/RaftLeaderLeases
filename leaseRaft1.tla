@@ -78,8 +78,6 @@ UpdateTermsExpr(i, j) ==
     /\ currentTerm' = [currentTerm EXCEPT ![j] = currentTerm[i]]
     /\ state' = [state EXCEPT ![j] = Secondary] 
 
-\* Action for incrementing the clock
-Tick == clock' = clock + 1
 --------------------------------------------------------------------------------
 
 \*
@@ -93,8 +91,8 @@ ClientWrite(i) ==
     /\ (   (lease[i][1]= currentTerm[i] /\ lease[i][2] >= clock) \* lease belongs to me and unexpired
         \/ (lease[i][1]# currentTerm[i] /\ lease[i][2] < clock) \* lease belongs to prev lead and expired
         )
-    /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock>>)]
-    /\ Tick
+    /\ clock' = clock + 1     
+    /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock'>>)]
     /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
 
 ClientRead(i) ==
@@ -150,8 +148,7 @@ BecomeLeader(i, voteQuorum) ==
                     IF s = i THEN Primary
                     ELSE IF s \in voteQuorum THEN Secondary \* All voters should revert to secondary state.
                     ELSE state[s]]
-    /\ Tick                                   
-    /\ UNCHANGED <<log, committed, latestRead, lease>>   
+    /\ UNCHANGED <<log, committed, latestRead, lease, clock>>   
             
 \* Primary 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
@@ -171,8 +168,7 @@ CommitEntry(i, commitQuorum) ==
                term  |-> currentTerm[i]]}
     /\ latestRead' = log[i][ind]         
     /\ lease' = [lease EXCEPT ![i] = <<currentTerm[i], log[i][ind][2]+Delta>>]
-    /\ Tick                                
-    /\ UNCHANGED <<currentTerm, state, log>>
+    /\ UNCHANGED <<currentTerm, state, log, clock>>
 
 \* Action that exchanges terms between two nodes and step down the primary if
 \* needed. This can be safely specified as a separate action, rather than
@@ -181,10 +177,12 @@ CommitEntry(i, commitQuorum) ==
 \* strictly necessary for guaranteeing safety.
 UpdateTerms(i, j) == 
     /\ UpdateTermsExpr(i, j)
-    /\ Tick 
-    /\ UNCHANGED <<log, committed, lease, latestRead>>
+    /\ UNCHANGED <<log, committed, lease, latestRead, clock>>
 
-
+\* Action for incrementing the clock
+Tick == 
+    /\ clock' = clock + 1
+    /\ UNCHANGED <<currentTerm, state, log, committed, lease, latestRead>>
 
 Init == 
     /\ currentTerm = [i \in Server |-> 0]
@@ -202,7 +200,8 @@ Next ==
     \/ \E s, t \in Server : RollbackEntries(s, t)
     \/ \E s \in Server : \E Q \in Quorums(Server) : BecomeLeader(s, Q) 
     \/ \E s \in Server : \E Q \in Quorums(Server) : CommitEntry(s, Q) 
-    \/ \E s,t \in Server : UpdateTerms(s, t) 
+    \/ \E s,t \in Server : UpdateTerms(s, t)
+    \/ Tick 
 
 Spec == Init /\ [][Next]_vars
 
