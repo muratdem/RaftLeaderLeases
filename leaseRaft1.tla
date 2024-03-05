@@ -78,8 +78,8 @@ UpdateTermsExpr(i, j) ==
     /\ currentTerm' = [currentTerm EXCEPT ![j] = currentTerm[i]]
     /\ state' = [state EXCEPT ![j] = Secondary] 
 
+\* Action for incrementing the clock
 Tick == clock' = clock + 1
-
 --------------------------------------------------------------------------------
 
 \*
@@ -88,10 +88,11 @@ Tick == clock' = clock + 1
 
 \* Node 'i', a primary, handles a new client request and places the entry 
 \* in its log.    
-ClientRequest(i) ==
+ClientWrite(i) ==
     /\ state[i] = Primary
-    \* wait until lease belongs to me or lease has expired
-    /\ (lease[i][1]= currentTerm[i] \/  lease[i][2] < clock)
+    /\ (   (lease[i][1]= currentTerm[i] /\ lease[i][2] >= clock) \* lease belongs to me and unexpired
+        \/ (lease[i][1]# currentTerm[i] /\ lease[i][2] < clock) \* lease belongs to prev lead and expired
+        )
     /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock>>)]
     /\ Tick
     /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
@@ -103,9 +104,7 @@ ClientRead(i) ==
     /\ LET cInd == MaxCommitted(committed).entry[1] 
            l == Len(log[i]) IN
         /\ latestRead' = IF cInd = 0 THEN <<0,0>>
-                         ELSE IF cInd <= l THEN log[i][cInd]
-                              ELSE IF l = 0 THEN <<0,0>>
-                                   ELSE log[i][l]     
+                         ELSE log[i][cInd] \* Raft guarantees cInd <= l
     /\ UNCHANGED <<currentTerm, state, log, committed, clock, lease>>
 
 \* Node 'i' gets a new log entry from node 'j'.
@@ -186,6 +185,7 @@ UpdateTerms(i, j) ==
     /\ UNCHANGED <<log, committed, lease, latestRead>>
 
 
+
 Init == 
     /\ currentTerm = [i \in Server |-> 0]
     /\ state       = [i \in Server |-> Secondary]
@@ -196,7 +196,7 @@ Init ==
     /\ latestRead = <<0,0>>
 
 Next == 
-    \/ \E s \in Server : ClientRequest(s)
+    \/ \E s \in Server : ClientWrite(s)
     \/ \E s \in Server : ClientRead(s)
     \/ \E s, t \in Server : GetEntries(s, t) 
     \/ \E s, t \in Server : RollbackEntries(s, t)
