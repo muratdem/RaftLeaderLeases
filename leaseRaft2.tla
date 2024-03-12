@@ -1,4 +1,4 @@
----- MODULE leaseRaft1 ----
+---- MODULE leaseRaft2 ----
 \*
 \* Basic, static version of MongoDB Raft protocol.
 \*
@@ -6,7 +6,7 @@
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 
 CONSTANTS Server
-CONSTANTS Secondary, Primary, Nil, Delta
+CONSTANTS Secondary, Primary, Nil, Delta, Epsilon
 
 VARIABLE currentTerm
 VARIABLE state
@@ -88,17 +88,17 @@ UpdateTermsExpr(i, j) ==
 \* in its log.    
 ClientWrite(i) ==
     /\ state[i] = Primary
-    /\ (\/ (lease[i][1]# currentTerm[i] /\ lease[i][2] < clock) \* lease belongs to prev lead and expired
-        \/ (lease[i][1]= currentTerm[i] /\ lease[i][2] >= clock) \* lease belongs to me and unexpired
+    /\ (\/ (lease[i][1]# currentTerm[i] /\ lease[i][2] < clock[i]) \* lease belongs to prev lead and expired
+        \/ (lease[i][1]= currentTerm[i] /\ lease[i][2] >= clock[i]) \* lease belongs to me and unexpired
         )
-    /\ clock' = clock + 1     
-    /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock'>>)]
+    /\ \A t \in Server: clock[i] < clock[t] + Epsilon  
+    /\ clock' = [ clock EXCEPT ![i] = clock[i] + 1 ] 
+    /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock'[i]>>)]
     /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
 
 ClientRead(i) ==
     /\ state[i] = Primary
-\*  /\ lease[i][1] = currentTerm[i] \* new leader can serve read on old leader's lease!!
-    /\ lease[i][2] >= clock
+    /\ lease[i][2] >= clock[i]
     /\ LET cInd == MaxCommitted(committed).entry[1] 
            l == Len(log[i]) IN
         /\ latestRead' = IF cInd = 0 THEN <<0,0>>
@@ -180,8 +180,9 @@ UpdateTerms(i, j) ==
     /\ UNCHANGED <<log, committed, lease, latestRead, clock>>
 
 \* Action for incrementing the clock
-Tick == 
-    /\ clock' = clock + 1
+Tick(s) == 
+    /\ \A t \in Server: clock[s] < clock[t] + Epsilon  
+    /\ clock' = [ clock EXCEPT ![s] = clock[s] + 1 ] 
     /\ UNCHANGED <<currentTerm, state, log, committed, lease, latestRead>>
 
 Init == 
@@ -189,7 +190,7 @@ Init ==
     /\ state       = [i \in Server |-> Secondary]
     /\ log = [i \in Server |-> <<>>]
     /\ committed = {}
-    /\ clock = 0
+    /\ clock = [i \in Server |-> 0]
     /\ lease = [i \in Server |-> <<-1,-1>>]  
     /\ latestRead = <<0,0>>
 
@@ -201,7 +202,7 @@ Next ==
     \/ \E s \in Server : \E Q \in Quorums(Server) : BecomeLeader(s, Q) 
     \/ \E s \in Server : \E Q \in Quorums(Server) : CommitEntry(s, Q) 
     \/ \E s,t \in Server : UpdateTerms(s, t)
-    \/ Tick 
+    \/ \E s \in Server : Tick(s) 
 
 Spec == Init /\ [][Next]_vars
 

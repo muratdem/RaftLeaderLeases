@@ -1,15 +1,14 @@
 ---- MODULE mcLeaseRaft ----
-EXTENDS TLC, leaseRaft1
+EXTENDS TLC, leaseRaft2
 
 \* State Constraint. Used for model checking only.
 CONSTANTS MaxTerm, MaxLogLen, MaxClock
 
 StateConstraint == 
-    /\ clock < MaxClock
     /\ \A s \in Server :
         /\ currentTerm[s] <= MaxTerm
         /\ Len(log[s]) <= MaxLogLen
-
+        /\ clock[s] <= MaxClock
 
 ServerSymmetry == Permutations(Server)      
 
