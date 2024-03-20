@@ -1,0 +1,9 @@
+one_way_latency_mean: 125  # Mean time for a message to go from one replica set node to another.
+one_way_latency_variance: 25  # Variance for one-way latency, which is lognormal distributed.
+noop_rate: 1  # How many time units between no-op writes.
+operations: 10  # How many reads + writes to simulate.
+interarrival: 50  # Mean time between operations, which are Poisson-distributed.
+check_linearizability: true  # Whether to check if the history was linearizable (slow!).
+keyspace_size: 1  # Number of keys. Reads/writes choose keys at random.
+seed: 361442447814208 # Optional random seed for reproducibility.
+
