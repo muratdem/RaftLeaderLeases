@@ -64,7 +64,8 @@ class Metrics:
 
 
 class Node:
-    def __init__(self, role: Role, cfg: DictConfig, prng: PRNG):
+    def __init__(self, index: int, role: Role, cfg: DictConfig, prng: PRNG):
+        self.index = index
         self.role = role
         self.prng = prng
         # Map key to (value, last-written time).
@@ -81,10 +82,8 @@ class Node:
     def initiate(self, nodes: list["Node"]):
         self.nodes = nodes[:]
         self.node_replication_positions = {id(n): OpTime.default() for n in nodes}
-        if self.role is Role.PRIMARY:
-            get_event_loop().create_task("no-op writer", self.noop_writer())
-        if self.role is Role.SECONDARY:
-            get_event_loop().create_task("replication", self.replicate())
+        get_event_loop().create_task("no-op writer", self.noop_writer())
+        get_event_loop().create_task("replication", self.replicate())
 
     @property
     def last_applied(self) -> OpTime:
@@ -93,17 +92,23 @@ class Node:
     async def noop_writer(self):
         while True:
             await sleep(self.noop_rate)
-            self._write_internal("noop", "")
+            if self.role is Role.PRIMARY:
+                self._write_internal("noop", "")
 
     async def replicate(self):
         log_position = 0
         while True:
             await sleep(1)
-            try:
-                primary = next(n for n in self.nodes if n.role is Role.PRIMARY)
-            except StopIteration:
-                continue  # No primary.
+            if self.role is Role.PRIMARY:
+                continue
 
+            primaries = [n for n in self.nodes if n.role is Role.PRIMARY]
+            if not primaries:
+                continue
+
+            # Simplification to avoid terms: sync from primary w/ longest log.
+            # Imagine we could see all primaries' log lengths at once.
+            primary = sorted(primaries, key=lambda n: len(n.log), reverse=True)[0]
             while log_position < len(primary.log):
                 # Find the next entry to replicate.
                 entry = primary.log[log_position]
@@ -188,6 +193,13 @@ class Node:
         value, last_written_optime = self.data.get(key, (None, OpTime.default()))
         return value
 
+    async def stepdown(self):
+        """Tell this node to become secondary."""
+        self.role = Role.SECONDARY
+
+    def __str__(self) -> str:
+        return f"Node {self.index} {self.role.name}"
+
 
 @dataclass
 class ClientLogEntry:
@@ -201,12 +213,21 @@ class ClientLogEntry:
     start_ts: Timestamp
     end_ts: Timestamp
     key: str
-    value: str | None = None
+    value: str | None
+    success: bool
 
     @property
     def duration(self) -> int:
         assert self.end_ts >= self.start_ts
         return self.end_ts - self.start_ts
+
+    def __str__(self) -> str:
+        if self.op_type is ClientLogEntry.OpType.Write:
+            return (f"{self.start_ts} -> {self.end_ts}:"
+                    f" write key {self.key}={self.value}"
+                    f" ({'ok' if self.success else 'failed'})")
+
+        return f"{self.start_ts} -> {self.end_ts}: read key {self.key}={self.value}"
 
 
 def next_value(_next=[-1]) -> str:
@@ -223,16 +244,14 @@ async def reader(
 ):
     await sleep(start_ts)
     # Attempt to read from any node.
-    node_index = prng.randint(0, len(nodes) - 1)
-    node = (nodes)[node_index]
-    node_name = f"node {node_index} {node.role.name}"
+    node = prng.choice(nodes)
     key = str(prng.random_key())
-    logger.info(f"Client {client_id} reading key {key} from {node_name}")
+    logger.info(f"Client {client_id} reading key {key} from {node}")
     try:
         value = await node.read(key=key)
         latency = get_current_ts() - start_ts
         logger.info(
-            f"Client {client_id} read key {key}={value} from {node_name}, latency={latency}"
+            f"Client {client_id} read key {key}={value} from {node}, latency={latency}"
         )
         client_log.append(
             ClientLogEntry(
@@ -243,11 +262,12 @@ async def reader(
                 end_ts=get_current_ts(),
                 key=key,
                 value=value,
+                success=True
             )
         )
     except Exception as e:
         logger.error(
-            f"Client {client_id} failed reading key {key} from {node_name}: {e}"
+            f"Client {client_id} failed reading key {key} from {node}: {e}"
         )
 
 
@@ -260,12 +280,10 @@ async def writer(
 ):
     await sleep(start_ts)
     # Attempt to write to any node.
-    node_index = prng.randint(0, len(nodes) - 1)
-    node = (nodes)[node_index]
-    node_name = f"node {node_index} {node.role.name}"
+    node = prng.choice(nodes)
     key = str(prng.random_key())
     value = next_value()
-    logger.info(f"Client {client_id} writing key {key}={value} to {node_name}")
+    logger.info(f"Client {client_id} writing key {key}={value} to {node}")
     try:
         await node.write(key=key, value=value)
         latency = get_current_ts() - start_ts
@@ -279,10 +297,35 @@ async def writer(
                 end_ts=get_current_ts(),
                 key=key,
                 value=value,
+                success=True
             )
         )
     except Exception as e:
-        logger.error(f"Client {client_id} failed writing key {key}={value}: {e}")
+        logger.error(
+            f"Client {client_id} failed writing key {key}={value} to {node}: {e}")
+        client_log.append(
+            ClientLogEntry(
+                client_id=client_id,
+                op_type=ClientLogEntry.OpType.Write,
+                server_role=Role.PRIMARY,
+                start_ts=start_ts,
+                end_ts=get_current_ts(),
+                key=key,
+                value=value,
+                success=False
+            )
+        )
+
+
+async def nemesis(nodes: list[Node],
+                  prng: PRNG,
+                  stepdown_rate: int):
+    while True:
+        await sleep(round(prng.exponential(stepdown_rate)))
+        node_index = prng.randint(0, len(nodes) - 1)
+        node = (nodes)[node_index]
+        logging.info(f"Stepping down {node}")
+        await node.stepdown()
 
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
@@ -294,8 +337,7 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
 
     logging.info("Checking linearizability. Log:")
     for entry in sorted(client_log, key=lambda e: e.start_ts):
-        logging.info(f"{entry.start_ts} -> {entry.end_ts}:"
-                     f" {entry.op_type.name} key {entry.key}={entry.value}")
+        logging.info(entry)
 
     def linearize(
         log: list[ClientLogEntry], model: dict
@@ -314,22 +356,36 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
                 # "entry" can't be linearized first, because e finished earlier.
                 continue
 
+            log_prime = log.copy()
+            log_prime.pop(i)
+
             if entry.op_type is ClientLogEntry.OpType.Write:
-                # What would the KV store contain if we did this write now?
+                # What would the KV store contain if we linearize this write here?
+                # Note, the write could commit even if !entry.success, e.g. the primary
+                # stepped down awaiting majority acknowledgment.
                 model_prime = model.copy()
                 model_prime[entry.key] = entry.value
-            else:
+                # Try to linearize the rest of the log with the KV store in this state.
+                linearization = linearize(log_prime, model_prime)
+                if linearization is not None:
+                    return [entry] + linearization
+
+            if entry.op_type is ClientLogEntry.OpType.Write and not entry.success:
+                # Above, we tried to linearize, assuming the write eventually succeeded,
+                # but that didn't work. Now assume the write had no effect.
+                linearization = linearize(log_prime, model)
+                if linearization is not None:
+                    return [entry] + linearization
+
+            if entry.op_type is ClientLogEntry.OpType.Read:
                 # What would this query return if we ran it now?
                 if model.get(entry.key) != entry.value:
                     continue  # "entry" can't be linearized first.
-                model_prime = model
 
-            # Try to linearize the rest of the log with the KV store in this state.
-            log_prime = log.copy()
-            log_prime.pop(i)
-            linearization = linearize(log_prime, model_prime)
-            if linearization is not None:
-                return [entry] + linearization
+                # Try to linearize the rest of the log with the KV store in this state.
+                linearization = linearize(log_prime, model)
+                if linearization is not None:
+                    return [entry] + linearization
 
         return None
 
@@ -406,9 +462,9 @@ async def main_coro(params: DictConfig, metrics: dict):
         params.keyspace_size,
     )
     nodes = [
-        Node(role=Role.PRIMARY, cfg=params, prng=prng),
-        Node(role=Role.SECONDARY, cfg=params, prng=prng),
-        Node(role=Role.SECONDARY, cfg=params, prng=prng),
+        Node(index=1, role=Role.PRIMARY, cfg=params, prng=prng),
+        Node(index=2, role=Role.SECONDARY, cfg=params, prng=prng),
+        Node(index=3, role=Role.SECONDARY, cfg=params, prng=prng),
     ]
     for n in nodes:
         n.initiate(nodes)
@@ -436,7 +492,13 @@ async def main_coro(params: DictConfig, metrics: dict):
                 client_log=client_log,
                 prng=prng,
             )
+
         tasks.append(lp.create_task(name=f"client {i}", coro=coro))
+
+    lp.create_task(
+        name="nemesis",
+        coro=nemesis(nodes=nodes, prng=prng, stepdown_rate=params.stepdown_rate)
+    ).ignore_future()
 
     for t in tasks:
         await t
