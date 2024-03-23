@@ -25,22 +25,11 @@ class Role(enum.Enum):
 
 
 @dataclass(order=True)
-class OpTime:
-    """A hybrid logical clock (HLC)."""
-
-    ts: Timestamp
-    i: int
-
-    @classmethod
-    def default(cls) -> "OpTime":
-        return OpTime(-1, -1)
-
-
-@dataclass(order=True)
 class Write:
     key: str = field(compare=False)
     value: str = field(compare=False)
-    optime: OpTime
+    term: int = field(compare=False)
+    ts: Timestamp
 
 
 class Metrics:
@@ -64,30 +53,27 @@ class Metrics:
 
 
 class Node:
-    def __init__(self, index: int, role: Role, cfg: DictConfig, prng: PRNG):
-        self.index = index
-        self.role = role
+    def __init__(self, node_index: int, cfg: DictConfig, prng: PRNG):
+        self.node_index = node_index
+        self.role = Role.SECONDARY
         self.prng = prng
-        # Map key to (value, last-written time).
-        self.data: dict[str, tuple[str, OpTime]] = {}
+        # Raft state (Raft paper p. 4).
+        self.current_term = 0
+        self.voted_for = None
         self.log: list[Write] = []
-        self.committed_optime: OpTime = OpTime.default()
-        self.last_applied_entry: Write | None = None
+        self.commit_index = 0
+        self.last_applied = 0
+        # Map from node index to the node's last-replicated log index.
+        self.match_index: dict[int, int] = {}
         self.nodes: list["Node"] | None = None
-        # Map Node ids to their last-replicated timestamps.
-        self.node_replication_positions: dict[int, OpTime] = {}
         self.noop_rate: int = cfg.noop_rate
         self.metrics = Metrics()
 
     def initiate(self, nodes: list["Node"]):
         self.nodes = nodes[:]
-        self.node_replication_positions = {id(n): OpTime.default() for n in nodes}
+        self.match_index = {n.node_index: 0 for n in nodes}
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
-
-    @property
-    def last_applied(self) -> OpTime:
-        return self.log[-1].optime if self.log else OpTime.default()
 
     async def noop_writer(self):
         while True:
@@ -95,91 +81,94 @@ class Node:
             if self.role is Role.PRIMARY:
                 self._write_internal("noop", "")
 
+    def _maybe_rollback(self, sync_source: "Node"):
+        # Search backward through source's log for latest entry that matches ours.
+        for index, source_entry in reversed(list(enumerate(sync_source.log))):
+            if index >= len(self.log):
+                continue
+
+            if self.log[index].term == sync_source.log[index].term:
+                # This is the latest matching index.
+                assert self.log[index] == sync_source.log[index]
+                n_rollback = len(self.log) - index - 1
+                if n_rollback > 0:
+                    logging.info(f"{self} rolling back {n_rollback} entries")
+                    del self.log[index + 1:]
+
+                return
+
     async def replicate(self):
-        log_position = 0
         while True:
             await sleep(1)
             if self.role is Role.PRIMARY:
                 continue
 
+            # Imagine we magically know who the primaries are.
             primaries = [n for n in self.nodes if n.role is Role.PRIMARY]
             if not primaries:
                 continue
 
-            # Simplification to avoid terms: sync from primary w/ longest log.
-            # Imagine we could see all primaries' log lengths at once.
-            primary = sorted(primaries, key=lambda n: len(n.log), reverse=True)[0]
-            while log_position < len(primary.log):
-                # Find the next entry to replicate.
-                entry = primary.log[log_position]
-                log_position += 1
+            sync_source = self.prng.choice(primaries)
+            if sync_source.current_term < self.current_term:
+                sync_source.stepdown()
+                continue
 
+            self._maybe_rollback(sync_source)
+            if len(self.log) < len(sync_source.log):
+                entry = sync_source.log[len(self.log) - 1]
                 # Simulate waiting for entry to arrive. It may have arrived already.
-                apply_time = entry.optime.ts + self.prng.one_way_latency_value()
+                apply_time = entry.ts + self.prng.one_way_latency_value()
                 await sleep(max(0, apply_time - get_current_ts()))
-                self.data[entry.key] = (entry.value, entry.optime)
                 self.log.append(entry)
-                self.node_replication_positions[id(self)] = entry.optime
+                self.match_index[self.node_index] = len(self.log) - 1
                 get_event_loop().call_later(
                     self.prng.one_way_latency_value(),
-                    primary.update_secondary_position,
-                    secondary=self,
-                    optime=entry.optime,
+                    sync_source.update_secondary_position,
+                    node_index=self.node_index,
+                    log_index=len(self.log) - 1,
                 ).ignore_future()
+                self.metrics.update("replication_lag", get_current_ts() - entry.ts)
 
-                self.metrics.update(
-                    "replication_lag", get_current_ts() - entry.optime.ts
-                )
-
-    def update_secondary_position(self, secondary: "Node", optime: OpTime):
+    def update_secondary_position(self, node_index, log_index: int):
         if self.role is not Role.PRIMARY:
             return
 
-        # Handle out-of-order messages with max(), assume no rollbacks.
-        self.node_replication_positions[id(secondary)] = max(
-            self.node_replication_positions[id(secondary)], optime
-        )
-        self.committed_optime = statistics.median(
-            self.node_replication_positions.values()
-        )
+        # TODO: what about an out-of-order message? Is max() below the right solution?
+        self.match_index[node_index] = log_index
+        self.commit_index = max(self.commit_index,
+                                statistics.median(self.match_index.values()))
 
         for n in self.nodes:
             if n is not self:
                 get_event_loop().call_later(
                     self.prng.one_way_latency_value(),
-                    n.update_committed_optime,
-                    self.committed_optime,
+                    n.update_commit_index,
+                    self.commit_index,
                 )
 
-    def update_committed_optime(self, optime: OpTime):
-        if optime > self.committed_optime:
-            self.committed_optime = optime
-            self.metrics.update("commit_lag", get_current_ts() - optime.ts)
+    def update_commit_index(self, index: int):
+        self.commit_index = max(self.commit_index, index)
 
-    def _write_internal(self, key: str, value: str) -> OpTime:
+    def _write_internal(self, key: str, value: str) -> None:
         """Update a key and append an oplog entry."""
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        optime = OpTime(get_current_ts(), 0)
-        if len(self.log) > 0 and self.log[-1].optime.ts == optime.ts:
-            optime.i = self.log[-1].optime.i + 1
-
-        w = Write(key=key, value=value, optime=optime)
-        self.data[w.key] = (value, w.optime)
+        w = Write(key=key, value=value, term=self.current_term, ts=get_current_ts())
         self.log.append(w)
-        self.node_replication_positions[id(self)] = optime
-        return optime
+        self.match_index[self.node_index] = len(self.log) - 1
 
     async def write(self, key: str, value: str):
         """Update a key, append an oplog entry, wait for w:majority."""
-        optime = self._write_internal(key=key, value=value)
-        while self.committed_optime < optime:
+        self._write_internal(key=key, value=value)
+        write_index = len(self.log) - 1
+        start_ts = get_current_ts()
+        while self.commit_index < write_index:
             await sleep(1)
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for w:majority")
 
-        commit_latency = get_current_ts() - optime.ts
+        commit_latency = get_current_ts() - start_ts
         self.metrics.update("commit_latency", commit_latency)
 
     async def read(self, key: str) -> str | None:
@@ -189,16 +178,17 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        # TODO: implement MVCC and read at committed ts. Remove last_written_optime.
-        value, last_written_optime = self.data.get(key, (None, OpTime.default()))
-        return value
+        # TODO: readConcern.
+        for entry in reversed(self.log):
+            if entry.key == key:
+                return entry.value
 
-    async def stepdown(self):
+    def stepdown(self):
         """Tell this node to become secondary."""
         self.role = Role.SECONDARY
 
     def __str__(self) -> str:
-        return f"Node {self.index} {self.role.name}"
+        return f"Node {self.node_index} {self.role.name}"
 
 
 @dataclass
@@ -209,7 +199,6 @@ class ClientLogEntry:
 
     client_id: int
     op_type: OpType
-    server_role: Role
     start_ts: Timestamp
     end_ts: Timestamp
     key: str
@@ -292,7 +281,6 @@ async def writer(
             ClientLogEntry(
                 client_id=client_id,
                 op_type=ClientLogEntry.OpType.Write,
-                server_role=Role.PRIMARY,
                 start_ts=start_ts,
                 end_ts=get_current_ts(),
                 key=key,
@@ -307,7 +295,6 @@ async def writer(
             ClientLogEntry(
                 client_id=client_id,
                 op_type=ClientLogEntry.OpType.Write,
-                server_role=Role.PRIMARY,
                 start_ts=start_ts,
                 end_ts=get_current_ts(),
                 key=key,
@@ -325,7 +312,7 @@ async def nemesis(nodes: list[Node],
         node_index = prng.randint(0, len(nodes) - 1)
         node = (nodes)[node_index]
         logging.info(f"Stepping down {node}")
-        await node.stepdown()
+        node.stepdown()
 
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
@@ -411,9 +398,11 @@ def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
         if entry.op_type == ClientLogEntry.OpType.Write:
             writes += 1
             write_time += entry.duration
-        elif entry.server_role is Role.PRIMARY:
+        elif entry.op_type == ClientLogEntry.OpType.Read:
             reads += 1
             read_time += entry.duration
+        else:
+            assert False, "unknown op type"
 
     metrics["write_latency"] = write_time / writes if writes else None
     metrics["read_latency"] = read_time / reads if reads else None
@@ -462,9 +451,9 @@ async def main_coro(params: DictConfig, metrics: dict):
         params.keyspace_size,
     )
     nodes = [
-        Node(index=1, role=Role.PRIMARY, cfg=params, prng=prng),
-        Node(index=2, role=Role.SECONDARY, cfg=params, prng=prng),
-        Node(index=3, role=Role.SECONDARY, cfg=params, prng=prng),
+        Node(node_index=1, cfg=params, prng=prng),
+        Node(node_index=2, cfg=params, prng=prng),
+        Node(node_index=3, cfg=params, prng=prng),
     ]
     for n in nodes:
         n.initiate(nodes)
