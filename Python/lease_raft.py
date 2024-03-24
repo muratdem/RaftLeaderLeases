@@ -1,10 +1,10 @@
-import collections
 import csv
 import enum
 import itertools
 import logging
 import statistics
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 
 import pandas as pd
@@ -34,8 +34,8 @@ class Write:
 
 class Metrics:
     def __init__(self):
-        self._totals = collections.Counter()
-        self._sample_counts = collections.Counter()
+        self._totals = Counter()
+        self._sample_counts = Counter()
 
     def update(self, metric_name: str, sample: int) -> None:
         self._totals[metric_name] += sample
@@ -53,25 +53,29 @@ class Metrics:
 
 
 class Node:
-    def __init__(self, node_index: int, cfg: DictConfig, prng: PRNG):
-        self.node_index = node_index
+    def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG):
+        self.node_id = node_id
         self.role = Role.SECONDARY
         self.prng = prng
         # Raft state (Raft paper p. 4).
         self.current_term = 0
-        self.voted_for = None
+        # Map from term to the id of the node we voted for in that term.
+        self.voted_for: dict[int, int] = {}
         self.log: list[Write] = []
         self.commit_index = 0
         self.last_applied = 0
-        # Map from node index to the node's last-replicated log index.
+        # Map from node id to the node's last-replicated log index.
         self.match_index: dict[int, int] = {}
-        self.nodes: list["Node"] | None = None
+        self.election_deadline = 0
+        self.nodes: dict[int, Node] = {}
+        # Node indexes of nodes that voted for us in each term.
+        self.votes_received: defaultdict[int, set] = defaultdict(set)
         self.noop_rate: int = cfg.noop_rate
         self.metrics = Metrics()
 
-    def initiate(self, nodes: list["Node"]):
-        self.nodes = nodes[:]
-        self.match_index = {n.node_index: 0 for n in nodes}
+    def initiate(self, nodes: dict[int, "Node"]):
+        self.nodes = nodes.copy()
+        self.match_index = {n.node_id: 0 for n in nodes.values()}
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
 
@@ -98,14 +102,20 @@ class Node:
                 return
 
     async def replicate(self):
+        self._reset_election_deadline()
         while True:
             await sleep(1)
-            if self.role is Role.PRIMARY:
+            if self.role is not Role.SECONDARY:
                 continue
 
-            # Imagine we magically know who the primaries are.
-            primaries = [n for n in self.nodes if n.role is Role.PRIMARY]
+            # Imagine we magically know who the primaries are. Unlike MongoDB, we redo
+            # sync source selection for every entry.
+            primaries = [n for n in self.nodes.values() if n.role is Role.PRIMARY]
             if not primaries:
+                if self.election_deadline <= get_current_ts():
+                    self._reset_election_deadline()
+                    self.become_candidate()
+
                 continue
 
             sync_source = self.prng.choice(primaries)
@@ -115,30 +125,94 @@ class Node:
 
             self._maybe_rollback(sync_source)
             if len(self.log) < len(sync_source.log):
-                entry = sync_source.log[len(self.log) - 1]
+                entry = sync_source.log[len(self.log)]
                 # Simulate waiting for entry to arrive. It may have arrived already.
                 apply_time = entry.ts + self.prng.one_way_latency_value()
                 await sleep(max(0, apply_time - get_current_ts()))
+                if self.role is not Role.SECONDARY:
+                    # Elected while waiting.
+                    continue
+
+                self._reset_election_deadline()
                 self.log.append(entry)
-                self.match_index[self.node_index] = len(self.log) - 1
+                self.match_index[self.node_id] = len(self.log) - 1
                 get_event_loop().call_later(
                     self.prng.one_way_latency_value(),
                     sync_source.update_secondary_position,
-                    node_index=self.node_index,
+                    node_id=self.node_id,
                     log_index=len(self.log) - 1,
                 ).ignore_future()
                 self.metrics.update("replication_lag", get_current_ts() - entry.ts)
 
-    def update_secondary_position(self, node_index, log_index: int):
+    def become_candidate(self) -> None:
+        if self.role is not Role.SECONDARY:
+            return
+
+        self.current_term += 1
+        self.voted_for[self.current_term] = self.node_id
+        self.votes_received[self.current_term] = set([self.node_id])
+        for node in self.nodes.values():
+            if node is not self:
+                get_event_loop().call_later(
+                    self.prng.one_way_latency_value(),
+                    node.request_vote,
+                    term=self.current_term,
+                    candidate_id=self.node_id,
+                    last_log_index=len(self.log) - 1,
+                    last_log_term=self.log[-1].term if self.log else 0)
+
+    def request_vote(self, term: int, candidate_id: int, last_log_index: int,
+                     last_log_term: int) -> None:
+        granted = True
+        if term < self.current_term:
+            granted = False
+
+        if term > self.current_term and self.role is Role.PRIMARY:
+            self.stepdown()
+
+        self.current_term = max(self.current_term, term)
+        if self.voted_for.get(term) not in (None, candidate_id):
+            granted = False
+
+        # Raft paper 5.4.1: "If the logs have last entries with different terms, then
+        # the log with the later term is more up-to-date. If the logs end with the same
+        # term, then whichever log is longer is more up-to-date."
+        if self.log and last_log_term < self.log[-1].term:
+            granted = False
+
+        if last_log_index < len(self.log) - 1:
+            granted = False
+
+        self.voted_for[term] = candidate_id
+        get_event_loop().call_later(
+            self.prng.one_way_latency_value(),
+            self.nodes[candidate_id].receive_vote,
+            voter_id=self.node_id,
+            term=self.current_term,
+            vote_granted=granted)
+
+    def receive_vote(self, voter_id: int, term: int, vote_granted: bool) -> None:
+        if term > self.current_term:
+            self.current_term = term
+            # Delayed vote reply reveals that we've been superseded.
+            if self.role is Role.PRIMARY:
+                self.stepdown()
+        elif term == self.current_term and vote_granted and self.role is Role.SECONDARY:
+            self.votes_received[term].add(voter_id)
+            if len(self.votes_received[term]) > len(self.nodes) / 2:
+                self.role = Role.PRIMARY
+                logging.info(f"{self} elected in term {self.current_term}")
+
+    def update_secondary_position(self, node_id, log_index: int):
         if self.role is not Role.PRIMARY:
             return
 
         # TODO: what about an out-of-order message? Is max() below the right solution?
-        self.match_index[node_index] = log_index
+        self.match_index[node_id] = log_index
         self.commit_index = max(self.commit_index,
                                 statistics.median(self.match_index.values()))
 
-        for n in self.nodes:
+        for n in self.nodes.values():
             if n is not self:
                 get_event_loop().call_later(
                     self.prng.one_way_latency_value(),
@@ -156,7 +230,7 @@ class Node:
 
         w = Write(key=key, value=value, term=self.current_term, ts=get_current_ts())
         self.log.append(w)
-        self.match_index[self.node_index] = len(self.log) - 1
+        self.match_index[self.node_id] = len(self.log) - 1
 
     async def write(self, key: str, value: str):
         """Update a key, append an oplog entry, wait for w:majority."""
@@ -187,8 +261,13 @@ class Node:
         """Tell this node to become secondary."""
         self.role = Role.SECONDARY
 
+    def _reset_election_deadline(self):
+        election_timeout = 10000  # TODO: in params.yaml
+        self.election_deadline = (get_current_ts() + election_timeout
+                                  + self.prng.randint(0, election_timeout))
+
     def __str__(self) -> str:
-        return f"Node {self.node_index} {self.role.name}"
+        return f"Node {self.node_id} {self.role.name}"
 
 
 @dataclass
@@ -246,7 +325,6 @@ async def reader(
             ClientLogEntry(
                 client_id=client_id,
                 op_type=ClientLogEntry.OpType.Read,
-                server_role=node.role,
                 start_ts=start_ts,
                 end_ts=get_current_ts(),
                 key=key,
@@ -291,28 +369,34 @@ async def writer(
     except Exception as e:
         logger.error(
             f"Client {client_id} failed writing key {key}={value} to {node}: {e}")
-        client_log.append(
-            ClientLogEntry(
-                client_id=client_id,
-                op_type=ClientLogEntry.OpType.Write,
-                start_ts=start_ts,
-                end_ts=get_current_ts(),
-                key=key,
-                value=value,
-                success=False
+
+        if str(e) != "Not primary":
+            # Add it to the log, some failed writes commit eventually.
+            client_log.append(
+                ClientLogEntry(
+                    client_id=client_id,
+                    op_type=ClientLogEntry.OpType.Write,
+                    start_ts=start_ts,
+                    end_ts=get_current_ts(),
+                    key=key,
+                    value=value,
+                    success=False
+                )
             )
-        )
 
 
-async def nemesis(nodes: list[Node],
+async def nemesis(nodes: dict[int, Node],
                   prng: PRNG,
                   stepdown_rate: int):
     while True:
         await sleep(round(prng.exponential(stepdown_rate)))
-        node_index = prng.randint(0, len(nodes) - 1)
-        node = (nodes)[node_index]
-        logging.info(f"Stepping down {node}")
-        node.stepdown()
+        primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
+        if not primaries:
+            continue
+
+        primary = prng.choice(primaries)
+        logging.info(f"Stepping down {primary}")
+        primary.stepdown()
 
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
@@ -346,21 +430,18 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
             log_prime = log.copy()
             log_prime.pop(i)
 
+            # Assume a failed write has no effect, new model == old model.
+            if entry.op_type is ClientLogEntry.OpType.Write and not entry.success:
+                linearization = linearize(log_prime, model)
+                if linearization is not None:
+                    return [entry] + linearization
+
+            # Assume the write succeeded. Even if !success it might eventually commit.
             if entry.op_type is ClientLogEntry.OpType.Write:
-                # What would the KV store contain if we linearize this write here?
-                # Note, the write could commit even if !entry.success, e.g. the primary
-                # stepped down awaiting majority acknowledgment.
                 model_prime = model.copy()
                 model_prime[entry.key] = entry.value
                 # Try to linearize the rest of the log with the KV store in this state.
                 linearization = linearize(log_prime, model_prime)
-                if linearization is not None:
-                    return [entry] + linearization
-
-            if entry.op_type is ClientLogEntry.OpType.Write and not entry.success:
-                # Above, we tried to linearize, assuming the write eventually succeeded,
-                # but that didn't work. Now assume the write had no effect.
-                linearization = linearize(log_prime, model)
                 if linearization is not None:
                     return [entry] + linearization
 
@@ -450,13 +531,16 @@ async def main_coro(params: DictConfig, metrics: dict):
         params.one_way_latency_variance,
         params.keyspace_size,
     )
-    nodes = [
-        Node(node_index=1, cfg=params, prng=prng),
-        Node(node_index=2, cfg=params, prng=prng),
-        Node(node_index=3, cfg=params, prng=prng),
-    ]
-    for n in nodes:
+    nodes = {
+        1: Node(node_id=1, cfg=params, prng=prng),
+        2: Node(node_id=2, cfg=params, prng=prng),
+        3: Node(node_id=3, cfg=params, prng=prng),
+    }
+    for n in nodes.values():
         n.initiate(nodes)
+
+    while not any(n.role == Role.PRIMARY for n in nodes.values()):
+        await sleep(1)
 
     lp = get_event_loop()
     client_log: list[ClientLogEntry] = []
@@ -469,7 +553,7 @@ async def main_coro(params: DictConfig, metrics: dict):
             coro = writer(
                 client_id=i,
                 start_ts=start_ts,
-                nodes=nodes,
+                nodes=list(nodes.values()),
                 client_log=client_log,
                 prng=prng,
             )
@@ -477,7 +561,7 @@ async def main_coro(params: DictConfig, metrics: dict):
             coro = reader(
                 client_id=i,
                 start_ts=start_ts,
-                nodes=nodes,
+                nodes=list(nodes.values()),
                 client_log=client_log,
                 prng=prng,
             )
@@ -497,8 +581,8 @@ async def main_coro(params: DictConfig, metrics: dict):
     save_metrics(metrics, client_log)
 
     def avg_metric(name: str) -> float | None:
-        total = sum(s.metrics.total(name) for s in nodes)
-        sample_count = sum(s.metrics.sample_count(name) for s in nodes)
+        total = sum(s.metrics.total(name) for s in nodes.values())
+        sample_count = sum(s.metrics.sample_count(name) for s in nodes.values())
         if sample_count > 0:
             return total / sample_count
 

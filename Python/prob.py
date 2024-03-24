@@ -28,11 +28,11 @@ class PRNG:
     def exponential(self, scale: float) -> float:
         return self._random_state.exponential(scale)
 
-    def one_way_latency_value(self):
+    def one_way_latency_value(self) -> int:
         mu, sigma = _lognormal_params(
             self._one_way_latency_mean, self._one_way_latency_variance
         )
-        return self._random_state.lognormal(mu, sigma)
+        return int(self._random_state.lognormal(mu, sigma))
 
     def random_key(self):
         return self._random_state.randint(0, self._keyspace_size)

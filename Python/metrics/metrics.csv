@@ -1,2 +1,2 @@
 write_latency,read_latency,replication_lag,commit_lag,commit_latency,read_commit_wait_pct,one_way_latency_mean,one_way_latency_variance,noop_rate,operations,interarrival,stepdown_rate,check_linearizability,keyspace_size,seed
-0.0,,,,,,125,500,1,30,50,200,True,1,
+,10531.0,143.0,,,,125,500,1000,100,100,500,True,1,
