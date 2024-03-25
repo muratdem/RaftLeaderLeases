@@ -1,6 +1,6 @@
 import heapq
 import inspect
-import typing
+from typing import Any, Callable, Coroutine
 from dataclasses import dataclass, field
 
 Timestamp = int
@@ -8,22 +8,24 @@ Timestamp = int
 
 class Future:
     def __init__(self):
-        self.callbacks: list[typing.Callable] = []
+        self.callbacks: list[Callable[[Any], None]] = []
         self.resolved = False
+        self.result = None
 
-    def add_done_callback(self, callback: typing.Callable):
+    def add_done_callback(self, callback: Callable[[Any], None]):
         assert not inspect.iscoroutinefunction(callback), "Use create_task()"
         if self.resolved:
-            callback()
+            callback(self.result)
         else:
             self.callbacks.append(callback)
 
-    def resolve(self):
+    def resolve(self, result=None):
         self.resolved = True
+        self.result = result
         callbacks = self.callbacks
         self.callbacks = []  # Prevent recursive resolves.
         for c in callbacks:
-            c()
+            c(result)
 
     def ignore_future(self):
         """To suppress 'coroutine is not awaited' static analysis warning."""
@@ -43,21 +45,21 @@ class _Task(Future):
         cls._instances.add(instance)
         return instance
 
-    def __init__(self, name: str, coro: typing.Coroutine):
+    def __init__(self, name: str, coro: Coroutine):
         super().__init__()
         self.name = name
         self.coro = coro
-        self.step()
+        self.step(None)
 
     def __str__(self):
         return f"_Task({repr(self.name)}, {self.coro})"
 
-    def step(self) -> None:
+    def step(self, value) -> None:
         try:
-            f = self.coro.send(None)
-        except StopIteration:
+            f = self.coro.send(value)
+        except StopIteration as e:
             _Task._instances.remove(self)
-            self.resolve()  # Resume coroutines stopped at "await task".
+            self.resolve(e.value)  # Resume coroutines stopped at "await task".
             return
 
         assert isinstance(f, Future)
@@ -81,7 +83,7 @@ class EventLoop:
     @dataclass(order=True)
     class _Alarm:
         deadline: Timestamp
-        callback: typing.Callable = field(compare=False)
+        callback: Callable = field(compare=False)
 
     def __init__(self):
         self._running = False
@@ -111,7 +113,7 @@ class EventLoop:
     def stop(self):
         self._running = False
 
-    def call_soon(self, callback: typing.Callable, *args, **kwargs) -> Future:
+    def call_soon(self, callback: Callable, *args, **kwargs) -> Future:
         """Schedule a callback as soon as possible.
 
         Returns a Future that will be resolved after the callback runs.
@@ -119,7 +121,7 @@ class EventLoop:
         return self.call_later(0, callback, *args, **kwargs)
 
     def call_later(
-        self, delay: int, callback: typing.Callable, *args, **kwargs
+        self, delay: int, callback: Callable, *args, **kwargs
     ) -> Future:
         """Schedule a callback after a delay.
 
@@ -138,7 +140,7 @@ class EventLoop:
         heapq.heappush(self._alarms, alarm)
         return f
 
-    def create_task(self, name: str, coro: typing.Coroutine) -> Future:
+    def create_task(self, name: str, coro: Coroutine) -> Future:
         """Start running a coroutine.
 
         Returns a Future that will be resolved after the coroutine finishes.
