@@ -2,8 +2,9 @@ one_way_latency_mean: 125  # Mean time for a message to go from one replica set 
 one_way_latency_variance: 500  # Variance for one-way latency, which is lognormal distributed.
 noop_rate: 1000  # How many time units between no-op writes.
 operations: 100  # How many reads + writes to simulate.
-interarrival: 100  # Mean time between operations, which are Poisson-distributed.
-stepdown_rate: 500  # Mean time between stepdowns, which are Poisson-distributed.
+interarrival: 500  # Mean time between operations, which are Poisson-distributed.
+stepdown_rate: 5000  # Mean time between stepdowns, which are Poisson-distributed.
+partition_rate: 500  # Mean time between partitions, which are Poisson-distributed.
 check_linearizability: true  # Whether to check if the history was linearizable (slow!).
 keyspace_size: 1  # Number of keys. Reads/writes choose keys at random.
 seed: # Optional random seed for reproducibility.

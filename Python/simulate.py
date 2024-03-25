@@ -1,22 +1,9 @@
 import heapq
 import inspect
-import logging
 import typing
 from dataclasses import dataclass, field
 
 Timestamp = int
-
-
-def initiate_logging() -> None:
-    class CustomFormatter(logging.Formatter):
-        def format(self, record):
-            original_msg = super().format(record)
-            return f"{get_current_ts()} {original_msg}"
-
-    formatter = CustomFormatter(fmt="%(levelname)s: %(message)s")
-    logging.basicConfig(level=logging.INFO)
-    for h in logging.getLogger().handlers:
-        h.setFormatter(formatter)
 
 
 class Future:
@@ -202,6 +189,6 @@ def _print_coro_position(task: _Task):
     for i in linenos:
         line = source_lines[i]
         mark = ">" if i == lineno else " "
-        print(f"{mark}{i+starting_lineno:4} {line}", end="")
+        print(f"{mark}{i + starting_lineno:4} {line}", end="")
         if i == 0 and lineno > context_lines + 1:
             print("      ...")

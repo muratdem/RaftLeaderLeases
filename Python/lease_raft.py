@@ -6,6 +6,7 @@ import statistics
 import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from typing import Callable
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -14,7 +15,7 @@ import yaml
 from omegaconf import DictConfig
 
 from prob import PRNG
-from simulate import Timestamp, get_current_ts, get_event_loop, initiate_logging, sleep
+from simulate import Timestamp, get_current_ts, get_event_loop, sleep
 
 logger = logging.getLogger("lease-raft")
 
@@ -52,18 +53,55 @@ class Metrics:
             return self._totals[metric_name] / self._sample_counts[metric_name]
 
 
+class Network:
+    def __init__(self, prng: PRNG, node_ids: list[int]):
+        self.prng = prng
+        self.node_ids = node_ids
+        self.left_partition: set[int] = set(node_ids)
+        self.right_partition: set[int] = set()
+
+    def send(self, from_id: int, method: Callable, *args, **kwargs) -> None:
+        assert from_id in self.node_ids
+        assert isinstance(method.__self__, Node)
+        to_id = method.__self__.node_id
+        assert to_id in self.node_ids
+        if self.reachable(from_id, to_id):
+            get_event_loop().call_later(self.prng.one_way_latency_value(),
+                                        method,
+                                        *args,
+                                        **kwargs)
+        else:
+            logging.debug(f"Drop {method.__name__} call from {from_id} to {to_id}")
+
+    def make_partition(self):
+        assert len(self.node_ids) == 3, "Rewrite logic for other numbers of nodes"
+        loner = self.prng.choice(self.node_ids)
+        self.left_partition = set([loner])
+        self.right_partition = set(self.node_ids) - self.left_partition
+        logger.info(f"Partitioned {self.left_partition} from {self.right_partition}")
+
+    def reset_partition(self):
+        self.left_partition = set(self.node_ids)
+        self.right_partition = set()
+        logger.info("Healed partition")
+
+    def reachable(self, from_id: int, to_id: int):
+        return ((from_id in self.left_partition and to_id in self.left_partition)
+                or (from_id in self.right_partition and to_id in self.right_partition))
+
+
 class Node:
-    def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG):
+    def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG, network: Network):
         self.node_id = node_id
         self.role = Role.SECONDARY
         self.prng = prng
+        self.network = network
         # Raft state (Raft paper p. 4).
         self.current_term = 0
         # Map from term to the id of the node we voted for in that term.
         self.voted_for: dict[int, int] = {}
         self.log: list[Write] = []
         self.commit_index = 0
-        self.last_applied = 0
         # Map from node id to the node's last-replicated log index.
         self.match_index: dict[int, int] = {}
         self.election_deadline = 0
@@ -96,7 +134,9 @@ class Node:
                 assert self.log[index] == sync_source.log[index]
                 n_rollback = len(self.log) - index - 1
                 if n_rollback > 0:
-                    logging.info(f"{self} rolling back {n_rollback} entries")
+                    logging.info(f"{self} rolling back {n_rollback} entries:")
+                    for e in self.log[index + 1:]:
+                        logging.info(f"    {e}")
                     del self.log[index + 1:]
 
                 return
@@ -113,12 +153,17 @@ class Node:
             primaries = [n for n in self.nodes.values() if n.role is Role.PRIMARY]
             if not primaries:
                 if self.election_deadline <= get_current_ts():
-                    self._reset_election_deadline()
-                    self.become_candidate()
+                    self.become_candidate()  # Resets election deadline.
 
                 continue
 
             sync_source = self.prng.choice(primaries)
+            if not self.network.reachable(self.node_id, sync_source.node_id):
+                logging.debug(
+                    f"Node {self.node_id} can't sync from {sync_source.node_id}")
+                await sleep(100)
+                continue
+
             if sync_source.current_term < self.current_term:
                 sync_source.stepdown()
                 continue
@@ -136,30 +181,28 @@ class Node:
                 self._reset_election_deadline()
                 self.log.append(entry)
                 self.match_index[self.node_id] = len(self.log) - 1
-                get_event_loop().call_later(
-                    self.prng.one_way_latency_value(),
-                    sync_source.update_secondary_position,
-                    node_id=self.node_id,
-                    log_index=len(self.log) - 1,
-                ).ignore_future()
+                self.network.send(self.node_id,
+                                  sync_source.update_secondary_position,
+                                  node_id=self.node_id,
+                                  log_index=len(self.log) - 1)
                 self.metrics.update("replication_lag", get_current_ts() - entry.ts)
 
     def become_candidate(self) -> None:
         if self.role is not Role.SECONDARY:
             return
 
+        self._reset_election_deadline()
         self.current_term += 1
         self.voted_for[self.current_term] = self.node_id
         self.votes_received[self.current_term] = set([self.node_id])
         for node in self.nodes.values():
             if node is not self:
-                get_event_loop().call_later(
-                    self.prng.one_way_latency_value(),
-                    node.request_vote,
-                    term=self.current_term,
-                    candidate_id=self.node_id,
-                    last_log_index=len(self.log) - 1,
-                    last_log_term=self.log[-1].term if self.log else 0)
+                self.network.send(self.node_id,
+                                  node.request_vote,
+                                  term=self.current_term,
+                                  candidate_id=self.node_id,
+                                  last_log_index=len(self.log) - 1,
+                                  last_log_term=self.log[-1].term if self.log else 0)
 
     def request_vote(self, term: int, candidate_id: int, last_log_index: int,
                      last_log_term: int) -> None:
@@ -184,12 +227,11 @@ class Node:
             granted = False
 
         self.voted_for[term] = candidate_id
-        get_event_loop().call_later(
-            self.prng.one_way_latency_value(),
-            self.nodes[candidate_id].receive_vote,
-            voter_id=self.node_id,
-            term=self.current_term,
-            vote_granted=granted)
+        self.network.send(self.node_id,
+                          self.nodes[candidate_id].receive_vote,
+                          voter_id=self.node_id,
+                          term=self.current_term,
+                          vote_granted=granted)
 
     def receive_vote(self, voter_id: int, term: int, vote_granted: bool) -> None:
         if term > self.current_term:
@@ -214,11 +256,9 @@ class Node:
 
         for n in self.nodes.values():
             if n is not self:
-                get_event_loop().call_later(
-                    self.prng.one_way_latency_value(),
-                    n.update_commit_index,
-                    self.commit_index,
-                )
+                self.network.send(self.node_id,
+                                  n.update_commit_index,
+                                  index=self.commit_index)
 
     def update_commit_index(self, index: int):
         self.commit_index = max(self.commit_index, index)
@@ -385,9 +425,9 @@ async def writer(
             )
 
 
-async def nemesis(nodes: dict[int, Node],
-                  prng: PRNG,
-                  stepdown_rate: int):
+async def stepdown_nemesis(nodes: dict[int, Node],
+                           prng: PRNG,
+                           stepdown_rate: int):
     while True:
         await sleep(round(prng.exponential(stepdown_rate)))
         primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
@@ -397,6 +437,16 @@ async def nemesis(nodes: dict[int, Node],
         primary = prng.choice(primaries)
         logging.info(f"Stepping down {primary}")
         primary.stepdown()
+
+
+async def partition_nemesis(network: Network,
+                            prng: PRNG,
+                            partition_rate: int):
+    while True:
+        await sleep(round(prng.exponential(partition_rate)))
+        network.make_partition()
+        await sleep(round(prng.exponential(partition_rate)))
+        network.reset_partition()
 
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
@@ -531,16 +581,30 @@ async def main_coro(params: DictConfig, metrics: dict):
         params.one_way_latency_variance,
         params.keyspace_size,
     )
+    network = Network(prng=prng, node_ids=[1, 2, 3])
     nodes = {
-        1: Node(node_id=1, cfg=params, prng=prng),
-        2: Node(node_id=2, cfg=params, prng=prng),
-        3: Node(node_id=3, cfg=params, prng=prng),
+        1: Node(node_id=1, cfg=params, prng=prng, network=network),
+        2: Node(node_id=2, cfg=params, prng=prng, network=network),
+        3: Node(node_id=3, cfg=params, prng=prng, network=network),
     }
+
+    # Log messages show current timestamp and nodes' roles.
+    class CustomFormatter(logging.Formatter):
+        def format(self, record):
+            original_msg = super().format(record)
+            node_roles = " ".join("1" if n.role is Role.PRIMARY else "2"
+                                  for n in nodes.values())
+            return f"{get_current_ts(): 8} {node_roles} {original_msg}"
+
+    formatter = CustomFormatter(fmt="%(levelname)s: %(message)s")
+    for h in logging.getLogger().handlers:
+        h.setFormatter(formatter)
+
     for n in nodes.values():
         n.initiate(nodes)
 
     while not any(n.role == Role.PRIMARY for n in nodes.values()):
-        await sleep(1)
+        await sleep(100)
 
     lp = get_event_loop()
     client_log: list[ClientLogEntry] = []
@@ -570,7 +634,14 @@ async def main_coro(params: DictConfig, metrics: dict):
 
     lp.create_task(
         name="nemesis",
-        coro=nemesis(nodes=nodes, prng=prng, stepdown_rate=params.stepdown_rate)
+        coro=stepdown_nemesis(nodes=nodes, prng=prng,
+                              stepdown_rate=params.stepdown_rate)
+    ).ignore_future()
+
+    lp.create_task(
+        name="nemesis",
+        coro=partition_nemesis(network=network, prng=prng,
+                               partition_rate=params.partition_rate)
     ).ignore_future()
 
     for t in tasks:
@@ -589,7 +660,6 @@ async def main_coro(params: DictConfig, metrics: dict):
     metrics["replication_lag"] = avg_metric("replication_lag")
     metrics["commit_lag"] = avg_metric("commit_lag")
     metrics["commit_latency"] = avg_metric("commit_latency")
-    metrics["read_commit_wait_pct"] = avg_metric("read_commit_wait_pct")
     if params.check_linearizability:
         do_linearizability_check(client_log)
 
@@ -611,7 +681,7 @@ def all_param_combos(raw_params: dict) -> list[DictConfig]:
 
 
 def main():
-    initiate_logging()
+    logging.basicConfig(level=logging.DEBUG)
     event_loop = get_event_loop()
     csv_writer: None | csv.DictWriter = None
     csv_path = "metrics/metrics.csv"
