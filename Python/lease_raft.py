@@ -112,6 +112,7 @@ class Node:
         # Node indexes of nodes that voted for us in each term.
         self.votes_received: defaultdict[int, set] = defaultdict(set)
         self.noop_rate: int = cfg.noop_rate
+        self.election_timeout: int = cfg.election_timeout
         self.metrics = Metrics()
 
     def initiate(self, nodes: dict[int, "Node"]):
@@ -306,9 +307,8 @@ class Node:
         self.role = Role.SECONDARY
 
     def _reset_election_deadline(self):
-        election_timeout = 10000  # TODO: in params.yaml
-        self.election_deadline = (get_current_ts() + election_timeout
-                                  + self.prng.randint(0, election_timeout))
+        self.election_deadline = (get_current_ts() + self.election_timeout
+                                  + self.prng.randint(0, self.election_timeout))
 
     def __str__(self) -> str:
         return f"Node {self.node_id} {self.role.name}"
@@ -437,11 +437,12 @@ async def stepdown_nemesis(nodes: dict[int, Node],
 
 async def partition_nemesis(network: Network,
                             prng: PRNG,
-                            partition_rate: int):
+                            partition_rate: int,
+                            heal_rate: int):
     while True:
         await sleep(round(prng.exponential(partition_rate)))
         network.make_partition()
-        await sleep(round(prng.exponential(partition_rate)))
+        await sleep(round(prng.exponential(heal_rate)))
         network.reset_partition()
 
 
@@ -637,7 +638,8 @@ async def main_coro(params: DictConfig, metrics: dict):
     lp.create_task(
         name="nemesis",
         coro=partition_nemesis(network=network, prng=prng,
-                               partition_rate=params.partition_rate)
+                               partition_rate=params.partition_rate,
+                               heal_rate=params.heal_rate)
     ).ignore_future()
 
     for t in tasks:
