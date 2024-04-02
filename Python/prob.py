@@ -34,7 +34,7 @@ class PRNG:
         )
         return int(self._random_state.lognormal(mu, sigma))
 
-    def random_key(self):
+    def random_key(self) -> int:
         return self._random_state.randint(0, self._keyspace_size)
 
 

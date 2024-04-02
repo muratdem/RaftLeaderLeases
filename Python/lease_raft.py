@@ -1,3 +1,4 @@
+import copy
 import csv
 import enum
 import itertools
@@ -5,7 +6,7 @@ import logging
 import statistics
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 import pandas as pd
@@ -25,11 +26,13 @@ class Role(enum.Enum):
     SECONDARY = enum.auto()
 
 
-@dataclass(order=True)
+@dataclass
 class Write:
-    key: str = field(compare=False)
-    value: str = field(compare=False)
-    term: int = field(compare=False)
+    """All writes are list-appends, to make linearizability checking easy."""
+    key: int
+    value: int
+    """The value appended to the list associated with key."""
+    term: int
     ts: Timestamp
 
 
@@ -121,7 +124,7 @@ class Node:
         while True:
             await sleep(self.noop_rate)
             if self.role is Role.PRIMARY:
-                self._write_internal("noop", "")
+                self._write_internal(-1, -1)
 
     def _maybe_rollback(self, sync_source: "Node"):
         # Search backward through source's log for latest entry that matches ours.
@@ -263,8 +266,8 @@ class Node:
     def update_commit_index(self, index: int):
         self.commit_index = max(self.commit_index, index)
 
-    def _write_internal(self, key: str, value: str) -> None:
-        """Update a key and append an oplog entry."""
+    def _write_internal(self, key: int, value: int) -> None:
+        """Append an oplog entry."""
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
@@ -272,8 +275,11 @@ class Node:
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
-    async def write(self, key: str, value: str):
-        """Update a key, append an oplog entry, wait for w:majority."""
+    async def write(self, key: int, value: int):
+        """Append value to the list associated with key.
+
+        In detail: append an oplog entry with 'value', wait for w:majority.
+        """
         self._write_internal(key=key, value=value)
         write_index = len(self.log) - 1
         start_ts = get_current_ts()
@@ -285,17 +291,15 @@ class Node:
         commit_latency = get_current_ts() - start_ts
         self.metrics.update("commit_latency", commit_latency)
 
-    async def read(self, key: str) -> str | None:
-        """Return a key's latest value."""
+    async def read(self, key: int) -> list[int]:
+        """Return a key's latest value, which is the list of values appended."""
         # We're not testing any consistency guarantees for secondary reads in this
         # simulation, so assume all queries have readPreference: "primary".
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
         # TODO: readConcern.
-        for entry in reversed(self.log):
-            if entry.key == key:
-                return entry.value
+        return [e.value for e in self.log if e.key == key]
 
     def stepdown(self):
         """Tell this node to become secondary."""
@@ -313,15 +317,15 @@ class Node:
 @dataclass
 class ClientLogEntry:
     class OpType(enum.Enum):
-        Write = enum.auto()
+        ListAppend = enum.auto()
         Read = enum.auto()
 
     client_id: int
     op_type: OpType
     start_ts: Timestamp
     end_ts: Timestamp
-    key: str
-    value: str | None
+    key: int
+    value: int | list[int]
     success: bool
 
     @property
@@ -330,17 +334,12 @@ class ClientLogEntry:
         return self.end_ts - self.start_ts
 
     def __str__(self) -> str:
-        if self.op_type is ClientLogEntry.OpType.Write:
+        if self.op_type is ClientLogEntry.OpType.ListAppend:
             return (f"{self.start_ts} -> {self.end_ts}:"
                     f" write key {self.key}={self.value}"
                     f" ({'ok' if self.success else 'failed'})")
 
         return f"{self.start_ts} -> {self.end_ts}: read key {self.key}={self.value}"
-
-
-def next_value(_next=[-1]) -> str:
-    _next[0] += 1
-    return str(_next[0])
 
 
 async def reader(
@@ -353,10 +352,10 @@ async def reader(
     await sleep(start_ts)
     # Attempt to read from any node.
     node = prng.choice(nodes)
-    key = str(prng.random_key())
+    key = prng.random_key()
     logger.info(f"Client {client_id} reading key {key} from {node}")
     try:
-        value = await node.read(key=key)
+        value: list[int] = await node.read(key=key)
         latency = get_current_ts() - start_ts
         logger.info(
             f"Client {client_id} read key {key}={value} from {node}, latency={latency}"
@@ -388,38 +387,35 @@ async def writer(
     await sleep(start_ts)
     # Attempt to write to any node.
     node = prng.choice(nodes)
-    key = str(prng.random_key())
-    value = next_value()
-    logger.info(f"Client {client_id} writing key {key}={value} to {node}")
+    key = prng.random_key()
+    logger.info(f"Appending key {key}+={client_id} to {node}")
     try:
-        await node.write(key=key, value=value)
+        await node.write(key=key, value=client_id)
         latency = get_current_ts() - start_ts
-        logger.info(f"Client {client_id} wrote key {key}={value}, latency={latency}")
+        logger.info(f"Appended key {key}+={client_id}, latency={latency}")
         client_log.append(
             ClientLogEntry(
                 client_id=client_id,
-                op_type=ClientLogEntry.OpType.Write,
+                op_type=ClientLogEntry.OpType.ListAppend,
                 start_ts=start_ts,
                 end_ts=get_current_ts(),
                 key=key,
-                value=value,
+                value=client_id,
                 success=True
             )
         )
     except Exception as e:
-        logger.error(
-            f"Client {client_id} failed writing key {key}={value} to {node}: {e}")
-
+        logger.error(f"Failed appending key {key}+={client_id} on {node}: {e}")
         if str(e) != "Not primary":
             # Add it to the log, some failed writes commit eventually.
             client_log.append(
                 ClientLogEntry(
                     client_id=client_id,
-                    op_type=ClientLogEntry.OpType.Write,
+                    op_type=ClientLogEntry.OpType.ListAppend,
                     start_ts=start_ts,
                     end_ts=get_current_ts(),
                     key=key,
-                    value=value,
+                    value=client_id,
                     success=False
                 )
             )
@@ -461,7 +457,7 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
         logging.info(entry)
 
     def linearize(
-        log: list[ClientLogEntry], model: dict
+        log: list[ClientLogEntry], model: defaultdict[int, list[int]]
     ) -> list[ClientLogEntry] | None:
         """Try linearizing a suffix of the log with the KV store "model" in some state.
 
@@ -480,16 +476,16 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
             log_prime = log.copy()
             log_prime.pop(i)
 
-            # Assume a failed write has no effect, new model == old model.
-            if entry.op_type is ClientLogEntry.OpType.Write and not entry.success:
+            # Assume a failed write has no effect, model' == model.
+            if entry.op_type is ClientLogEntry.OpType.ListAppend and not entry.success:
                 linearization = linearize(log_prime, model)
                 if linearization is not None:
                     return [entry] + linearization
 
             # Assume the write succeeded. Even if !success it might eventually commit.
-            if entry.op_type is ClientLogEntry.OpType.Write:
-                model_prime = model.copy()
-                model_prime[entry.key] = entry.value
+            if entry.op_type is ClientLogEntry.OpType.ListAppend:
+                model_prime = copy.deepcopy(model)
+                model_prime[entry.key].append(entry.value)
                 # Try to linearize the rest of the log with the KV store in this state.
                 linearization = linearize(log_prime, model_prime)
                 if linearization is not None:
@@ -497,7 +493,7 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
 
             if entry.op_type is ClientLogEntry.OpType.Read:
                 # What would this query return if we ran it now?
-                if model.get(entry.key) != entry.value:
+                if model[entry.key] != entry.value:
                     continue  # "entry" can't be linearized first.
 
                 # Try to linearize the rest of the log with the KV store in this state.
@@ -510,7 +506,7 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     logger.info("Checking linearizability....")
     check_start = time.monotonic()
     # Sort by start_ts to make the search succeed sooner.
-    result = linearize(sorted(client_log, key=lambda y: y.start_ts), {})
+    result = linearize(sorted(client_log, key=lambda y: y.start_ts), defaultdict(list))
     check_duration = time.monotonic() - check_start
     if result is None:
         raise Exception("not linearizable!")
@@ -526,7 +522,7 @@ def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
     writes, reads = 0, 0
     write_time, read_time = 0, 0
     for entry in client_log:
-        if entry.op_type == ClientLogEntry.OpType.Write:
+        if entry.op_type == ClientLogEntry.OpType.ListAppend:
             writes += 1
             write_time += entry.duration
         elif entry.op_type == ClientLogEntry.OpType.Read:
