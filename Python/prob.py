@@ -2,7 +2,6 @@
 
 import numpy as np
 from functools import lru_cache
-from scipy.optimize import fsolve
 
 
 class PRNG:
@@ -41,12 +40,6 @@ class PRNG:
 @lru_cache
 def _lognormal_params(mean: float, variance: float) -> tuple[float, float]:
     """Get lognormal distribution's mu and sigma for a desired mean and variance."""
-
-    def func(sigma):
-        mu = np.log(mean) - sigma**2 / 2
-        calculated_variance = (np.exp(sigma**2) - 1) * np.exp(2 * mu + sigma**2)
-        return calculated_variance - variance
-
-    sigma_solution = fsolve(func, 1.0)[0]
-    mu_solution = np.log(mean) - (sigma_solution**2) / 2
-    return float(mu_solution), float(sigma_solution)
+    sigma_squared = np.log(variance / mean**2 + 1)
+    mu = np.log(mean) - sigma_squared / 2
+    return mu, np.sqrt(sigma_squared)

@@ -2,4 +2,3 @@ omegaconf
 pandas
 plotly
 pyyaml
-scipy
