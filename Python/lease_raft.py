@@ -104,7 +104,7 @@ class Node:
         # Map from term to the id of the node we voted for in that term.
         self.voted_for: dict[int, int] = {}
         self.log: list[Write] = []
-        self.commit_index = 0
+        self.commit_index = -1
         # Map from node id to the node's last-replicated log index.
         self.match_index: dict[int, int] = {}
         self.election_deadline = 0
