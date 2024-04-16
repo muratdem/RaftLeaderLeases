@@ -168,12 +168,12 @@ class Node:
 
             sync_source = self.prng.choice(primaries)
             if not self.network.reachable(self.node_id, sync_source.node_id):
-                logging.debug(
-                    f"Node {self.node_id} can't sync from {sync_source.node_id}")
+                logging.debug(f"{self} can't sync from {sync_source}, unreachable")
                 await sleep(100)
                 continue
 
             if sync_source.current_term < self.current_term:
+                logger.info(f"{sync_source} stepping down, {self} has higher term")
                 sync_source.stepdown()
                 continue
 
@@ -202,6 +202,7 @@ class Node:
 
         self._reset_election_deadline()
         self.current_term += 1
+        logger.info(f"{self} running for election in term {self.current_term}")
         self.voted_for[self.current_term] = self.node_id
         self.votes_received[self.current_term] = set([self.node_id])
         for node in self.nodes.values():
@@ -235,7 +236,10 @@ class Node:
         if last_log_index < len(self.log) - 1:
             granted = False
 
-        self.voted_for[term] = candidate_id
+        if granted:
+            self.voted_for[term] = candidate_id
+            self._reset_election_deadline()
+
         self.network.send(self.node_id,
                           self.nodes[candidate_id].receive_vote,
                           voter_id=self.node_id,
@@ -247,6 +251,7 @@ class Node:
             self.current_term = term
             # Delayed vote reply reveals that we've been superseded.
             if self.role is Role.PRIMARY:
+                logging.info(f"{self} stepping down, node {voter_id} has higher term")
                 self.stepdown()
         elif term == self.current_term and vote_granted and self.role is Role.SECONDARY:
             self.votes_received[term].add(voter_id)
