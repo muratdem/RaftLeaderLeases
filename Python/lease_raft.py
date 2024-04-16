@@ -26,6 +26,11 @@ class Role(enum.Enum):
     SECONDARY = enum.auto()
 
 
+class ReadConcern(enum.Enum):
+    LOCAL = enum.auto()
+    MAJORITY = enum.auto()
+
+
 @dataclass
 class Write:
     """All writes are list-appends, to make linearizability checking easy."""
@@ -292,15 +297,16 @@ class Node:
         commit_latency = get_current_ts() - start_ts
         self.metrics.update("commit_latency", commit_latency)
 
-    async def read(self, key: int) -> list[int]:
+    async def read(self, key: int, concern: ReadConcern) -> list[int]:
         """Return a key's latest value, which is the list of values appended."""
         # We're not testing any consistency guarantees for secondary reads in this
         # simulation, so assume all queries have readPreference: "primary".
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        # TODO: readConcern.
-        return [e.value for e in self.log if e.key == key]
+        log = (self.log if concern is ReadConcern.LOCAL
+               else self.log[:self.commit_index + 1])
+        return [e.value for e in log if e.key == key]
 
     def stepdown(self):
         """Tell this node to become secondary."""
@@ -355,7 +361,7 @@ async def reader(
     key = prng.random_key()
     logger.info(f"Client {client_id} reading key {key} from {node}")
     try:
-        value: list[int] = await node.read(key=key)
+        value: list[int] = await node.read(key=key, concern=ReadConcern.MAJORITY)
         latency = get_current_ts() - start_ts
         logger.info(
             f"Client {client_id} read key {key}={value} from {node}, latency={latency}"
@@ -510,6 +516,8 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     result = linearize(sorted(client_log, key=lambda y: y.start_ts), defaultdict(list))
     check_duration = time.monotonic() - check_start
     if result is None:
+        logger.info(f"Failed to linearize {len(client_log)} entries after"
+                    f" {check_duration:.2f} sec")
         raise Exception("not linearizable!")
 
     logger.info(
