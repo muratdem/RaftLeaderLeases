@@ -81,12 +81,19 @@ class Network:
         else:
             logging.debug(f"Drop {method.__name__} call from {from_id} to {to_id}")
 
-    def make_partition(self):
-        assert len(self.node_ids) == 3, "Rewrite logic for other numbers of nodes"
-        loner = self.prng.choice(self.node_ids)
-        self.left_partition = set([loner])
-        self.right_partition = set(self.node_ids) - self.left_partition
+    def make_partition(self,
+                       left_partition: set[int],
+                       right_partition: set[int]) -> None:
+        assert left_partition.isdisjoint(right_partition)
+        assert left_partition.union(right_partition) == set(self.node_ids)
+        self.left_partition = left_partition
+        self.right_partition = right_partition
         logger.info(f"Partitioned {self.left_partition} from {self.right_partition}")
+
+    def make_random_partition(self):
+        assert len(self.node_ids) == 3, "Rewrite logic for other numbers of nodes"
+        loner = set([self.prng.choice(self.node_ids)])
+        self.make_partition(loner, set(self.node_ids) - loner)
 
     def reset_partition(self):
         self.left_partition = set(self.node_ids)
@@ -522,7 +529,7 @@ async def partition_nemesis(network: Network,
                             heal_rate: int):
     while True:
         await sleep(round(prng.exponential(partition_rate)))
-        network.make_partition()
+        network.make_random_partition()
         await sleep(round(prng.exponential(heal_rate)))
         network.reset_partition()
 
@@ -651,23 +658,7 @@ def chart_metrics(raw_params: dict, csv_path: str):
     logger.info(f"Created {chart_path}")
 
 
-async def main_coro(params: DictConfig, metrics: dict):
-    logger.info(params)
-    seed = int(time.monotonic_ns() if params.seed is None else params.seed)
-    logger.info(f"Seed {seed}")
-    prng = PRNG(
-        seed,
-        params.one_way_latency_mean,
-        params.one_way_latency_variance,
-        params.keyspace_size,
-    )
-    network = Network(prng=prng, node_ids=[1, 2, 3])
-    nodes = {
-        1: Node(node_id=1, cfg=params, prng=prng, network=network),
-        2: Node(node_id=2, cfg=params, prng=prng, network=network),
-        3: Node(node_id=3, cfg=params, prng=prng, network=network),
-    }
-
+def setup_logging(nodes: dict[int, Node]) -> None:
     # Log messages show current timestamp and nodes' roles.
     class CustomFormatter(logging.Formatter):
         def format(self, record):
@@ -680,6 +671,19 @@ async def main_coro(params: DictConfig, metrics: dict):
     for h in logging.getLogger().handlers:
         h.setFormatter(formatter)
 
+
+async def main_coro(params: DictConfig, metrics: dict):
+    logger.info(params)
+    prng = PRNG(cfg=params)
+    logger.info(f"Seed {prng.seed}")
+    network = Network(prng=prng, node_ids=[1, 2, 3])
+    nodes = {
+        1: Node(node_id=1, cfg=params, prng=prng, network=network),
+        2: Node(node_id=2, cfg=params, prng=prng, network=network),
+        3: Node(node_id=3, cfg=params, prng=prng, network=network),
+    }
+
+    setup_logging(nodes)
     for n in nodes.values():
         n.initiate(nodes)
 

@@ -110,6 +110,14 @@ class EventLoop:
             else:
                 return  # All done.
 
+    def run_until_complete(self, future: Future) -> Any:
+        assert not self._running
+        if not future.resolved:
+            future.add_done_callback(lambda x: self.stop())
+            self.run()
+
+        return future.result
+
     def stop(self):
         self._running = False
 

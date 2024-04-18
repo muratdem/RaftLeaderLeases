@@ -1,21 +1,19 @@
 """Utilities for probability distributions."""
 
-import numpy as np
+import time
 from functools import lru_cache
+
+import numpy as np
+from omegaconf import DictConfig
 
 
 class PRNG:
-    def __init__(
-        self,
-        seed: int,
-        one_way_latency_mean: float,
-        one_way_latency_variance: float,
-        keyspace_size: int,
-    ):
-        self._random_state = np.random.RandomState(seed % 2**32)
-        self._one_way_latency_mean = one_way_latency_mean
-        self._one_way_latency_variance = one_way_latency_variance
-        self._keyspace_size = keyspace_size
+    def __init__(self, cfg: DictConfig):
+        self.seed = int(time.monotonic_ns() if cfg.seed is None else cfg.seed)
+        self._random_state = np.random.RandomState(self.seed % 2 ** 32)
+        self._one_way_latency_mean = cfg.one_way_latency_mean
+        self._one_way_latency_variance = cfg.one_way_latency_variance
+        self._keyspace_size = cfg.keyspace_size
 
     def randint(self, low_inclusive: int, high_inclusive: int) -> int:
         # NumPy's rand_int excludes the high value, make it inclusive.

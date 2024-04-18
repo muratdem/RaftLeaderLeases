@@ -12,4 +12,4 @@ partition_rate: 500  # Mean time between partitions, which are Poisson-distribut
 heal_rate: 1000  # Mean time to heal a partition, exponentially distributed.
 check_linearizability: true  # Whether to check if the history was linearizable (slow!).
 keyspace_size: 1  # Number of keys. Reads/writes choose keys at random.
-seed: 51607516606875 # Optional random seed for reproducibility.
+seed: # Optional random seed for reproducibility.

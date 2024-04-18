@@ -1,0 +1,2 @@
+write_latency,read_latency,replication_lag,commit_lag,commit_latency,election_timeout,one_way_latency_mean,one_way_latency_variance,noop_rate,heartbeat_rate,operations,interarrival,stepdown_rate,partition_rate,heal_rate,check_linearizability,keyspace_size,seed
+3220.0,1600.0,130.5,,246.0,1000,125,100,1000,500,50,50,50000,500,1000,True,1,
