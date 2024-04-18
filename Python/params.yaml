@@ -4,6 +4,7 @@ election_timeout: 1000
 one_way_latency_mean: 125  # Mean time for a message to go from one replica set node to another.
 one_way_latency_variance: 100  # Variance for one-way latency, which is lognormal distributed.
 noop_rate: 1000  # How many time units between no-op writes.
+heartbeat_rate: 500  # How many time units between heartbeat messages.
 operations: 50  # How many reads + writes to simulate.
 interarrival: 50  # Mean time between operations, which are Poisson-distributed.
 stepdown_rate: 50000  # Mean time between stepdowns, which are Poisson-distributed.

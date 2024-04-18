@@ -98,12 +98,39 @@ class Network:
                 or (from_id in self.right_partition and to_id in self.right_partition))
 
 
+class _Monitor:
+    """One node's view of its peers."""
+
+    @dataclass
+    class PeerPing:
+        role: Role
+        term: int
+        ts: Timestamp
+
+    def __init__(self):
+        # Map node id -> latest ping.
+        self.pings: dict[int, _Monitor.PeerPing] = {}
+
+    def received_ping(self, node_id: int, role: Role, term: int) -> None:
+        self.pings[node_id] = _Monitor.PeerPing(
+            role=role, term=term, ts=get_current_ts())
+
+    def last_primary_timestamp(self) -> Timestamp:
+        return max(
+            (p.ts for p in self.pings.values() if p.role == Role.PRIMARY), default=-1)
+
+    def primaries(self, min_term: int, min_ts: Timestamp) -> list[int]:
+        return [node_id for node_id, p in self.pings.items()
+                if p.term >= min_term and p.ts >= min_ts and p.role == Role.PRIMARY]
+
+
 class Node:
     def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG, network: Network):
         self.node_id = node_id
         self.role = Role.SECONDARY
         self.prng = prng
         self.network = network
+        self.monitor = _Monitor()
         # Raft state (Raft paper p. 4).
         self.current_term = 0
         # Map from term to the id of the node we voted for in that term.
@@ -118,6 +145,7 @@ class Node:
         self.votes_received: defaultdict[int, set] = defaultdict(set)
         self.noop_rate: int = cfg.noop_rate
         self.election_timeout: int = cfg.election_timeout
+        self.heartbeat_rate: int = cfg.heartbeat_rate
         self.metrics = Metrics()
 
     def initiate(self, nodes: dict[int, "Node"]):
@@ -125,6 +153,7 @@ class Node:
         self.match_index = {n.node_id: 0 for n in nodes.values()}
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
+        get_event_loop().create_task("heartbeat", self.heartbeat())
 
     async def noop_writer(self):
         while True:
@@ -157,21 +186,25 @@ class Node:
             if self.role is not Role.SECONDARY:
                 continue
 
-            # Imagine we magically know who the primaries are. Unlike MongoDB, we redo
-            # sync source selection for every entry.
-            primaries = [n for n in self.nodes.values() if n.role is Role.PRIMARY]
-            if not primaries:
+            primary_ids = self.monitor.primaries(
+                min_term=self.current_term,
+                min_ts=get_current_ts() - self.election_timeout)
+
+            if not primary_ids:
                 if self.election_deadline <= get_current_ts():
                     self.become_candidate()  # Resets election deadline.
 
                 continue
 
-            sync_source = self.prng.choice(primaries)
+            sync_source = self.nodes[self.prng.choice(primary_ids)]
             if not self.network.reachable(self.node_id, sync_source.node_id):
                 logging.debug(f"{self} can't sync from {sync_source}, unreachable")
                 await sleep(100)
                 continue
 
+            self.monitor.received_ping(node_id=sync_source.node_id,
+                                       role=sync_source.role,
+                                       term=sync_source.current_term)
             if sync_source.current_term < self.current_term:
                 logger.info(f"{sync_source} stepping down, {self} has higher term")
                 sync_source.stepdown()
@@ -193,8 +226,36 @@ class Node:
                 self.network.send(self.node_id,
                                   sync_source.update_secondary_position,
                                   node_id=self.node_id,
+                                  term=self.current_term,
                                   log_index=len(self.log) - 1)
                 self.metrics.update("replication_lag", get_current_ts() - entry.ts)
+
+    async def heartbeat(self):
+        while True:
+            await sleep(self.heartbeat_rate)
+            for node in self.nodes.values():
+                if node is not self:
+                    logging.info(f"{self} sending heartbeat to {node}")
+                    self.network.send(self.node_id,
+                                      node.request_heartbeat,
+                                      node_id=self.node_id,
+                                      term=self.current_term,
+                                      role=self.role)
+
+    def request_heartbeat(self, node_id: int, term: int, role: Role) -> None:
+        self.monitor.received_ping(node_id=node_id, role=role, term=term)
+        node = self.nodes[node_id]
+        logging.info(f"{self} got heartbeat from {node}")
+        self.network.send(self.node_id,
+                          node.reply_to_heartbeat,
+                          node_id=self.node_id,
+                          term=self.current_term,
+                          role=self.role)
+
+    def reply_to_heartbeat(self, node_id: int, term: int, role: Role) -> None:
+        self.monitor.received_ping(node_id=node_id, role=role, term=term)
+        node = self.nodes[node_id]
+        logging.info(f"{self} got heartbeat reply from {node}")
 
     def become_candidate(self) -> None:
         if self.role is not Role.SECONDARY:
@@ -259,7 +320,13 @@ class Node:
                 self.role = Role.PRIMARY
                 logging.info(f"{self} elected in term {self.current_term}")
 
-    def update_secondary_position(self, node_id, log_index: int):
+                # TODO: SERVER-77506, commit a majority no-op.
+
+    def update_secondary_position(self, node_id: int, term: int, log_index: int):
+        self.monitor.received_ping(node_id=node_id,
+                                   role=Role.SECONDARY,
+                                   term=term)
+
         if self.role is not Role.PRIMARY:
             return
 
@@ -272,9 +339,12 @@ class Node:
             if n is not self:
                 self.network.send(self.node_id,
                                   n.update_commit_index,
+                                  node_id=self.node_id,
+                                  term=self.current_term,
                                   index=self.commit_index)
 
-    def update_commit_index(self, index: int):
+    def update_commit_index(self, node_id: int, term: int, index: int):
+        self.monitor.received_ping(node_id=node_id, role=Role.PRIMARY, term=term)
         self.commit_index = max(self.commit_index, index)
 
     def _write_internal(self, key: int, value: int) -> None:
