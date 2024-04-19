@@ -6,7 +6,7 @@ import logging
 import statistics
 import time
 from collections import Counter, defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import pandas as pd
@@ -39,6 +39,14 @@ class Write:
     """The value appended to the list associated with key."""
     term: int
     ts: Timestamp
+    """Timestamp from originating primary's clock."""
+    local_ts: Timestamp = field(compare=False)
+    """Timestamp at this server's clock."""
+
+    def copy_with_local_ts(self, local_ts: Timestamp) -> "Write":
+        entry = copy.copy(self)
+        entry.local_ts = local_ts
+        return entry
 
 
 class Metrics:
@@ -118,9 +126,8 @@ class _Monitor:
         # Map node id -> latest ping.
         self.pings: dict[int, _Monitor.PeerPing] = {}
 
-    def received_ping(self, node_id: int, role: Role, term: int) -> None:
-        self.pings[node_id] = _Monitor.PeerPing(
-            role=role, term=term, ts=get_current_ts())
+    def received_ping(self, node_id: int, role: Role, term: int, ts: Timestamp) -> None:
+        self.pings[node_id] = _Monitor.PeerPing(role=role, term=term, ts=ts)
 
     def last_primary_timestamp(self) -> Timestamp:
         return max(
@@ -131,13 +138,35 @@ class _Monitor:
                 if p.term >= min_term and p.ts >= min_ts and p.role == Role.PRIMARY]
 
 
+class _NodeClock:
+    """One node's clock."""
+
+    def __init__(self, cfg: DictConfig, prng: PRNG):
+        self.previous_true_ts = self.previous_ts = get_current_ts()
+        self.max_clock_error: float = cfg.max_clock_error
+        self.prng = prng
+
+    def now(self):
+        now = get_current_ts()
+        true_span = now - self.previous_true_ts
+        next_ts = self.prng.randint(
+            int(self.previous_ts + true_span * (1 - self.max_clock_error)),
+            int(self.previous_ts + true_span * (1 + self.max_clock_error)))
+        self.previous_ts = next_ts
+        self.previous_true_ts = now
+        return next_ts
+
+
 class Node:
     def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG, network: Network):
         self.node_id = node_id
         self.role = Role.SECONDARY
         self.prng = prng
+        self.clock = _NodeClock(cfg, prng)
         self.network = network
         self.monitor = _Monitor()
+        self.leases_enabled: bool = cfg.leases_enabled
+        self.lease_timeout: int = cfg.lease_timeout
         # Raft state (Raft paper p. 4).
         self.current_term = 0
         # Map from term to the id of the node we voted for in that term.
@@ -193,12 +222,13 @@ class Node:
             if self.role is not Role.SECONDARY:
                 continue
 
+            now = self.clock.now()
             primary_ids = self.monitor.primaries(
                 min_term=self.current_term,
-                min_ts=get_current_ts() - self.election_timeout)
+                min_ts=now - self.election_timeout)
 
             if not primary_ids:
-                if self.election_deadline <= get_current_ts():
+                if self.election_deadline <= now:
                     self.become_candidate()  # Resets election deadline.
 
                 continue
@@ -211,7 +241,8 @@ class Node:
 
             self.monitor.received_ping(node_id=sync_source.node_id,
                                        role=sync_source.role,
-                                       term=sync_source.current_term)
+                                       term=sync_source.current_term,
+                                       ts=self.clock.now())
             if sync_source.current_term < self.current_term:
                 logger.info(f"{sync_source} stepping down, {self} has higher term")
                 sync_source.stepdown()
@@ -228,7 +259,8 @@ class Node:
                     continue
 
                 self._reset_election_deadline()
-                self.log.append(entry)
+                # Update entry's local_ts, for tracking leases.
+                self.log.append(entry.copy_with_local_ts(self.clock.now()))
                 self.match_index[self.node_id] = len(self.log) - 1
                 self.network.send(self.node_id,
                                   sync_source.update_secondary_position,
@@ -242,7 +274,7 @@ class Node:
             await sleep(self.heartbeat_rate)
             for node in self.nodes.values():
                 if node is not self:
-                    logging.info(f"{self} sending heartbeat to {node}")
+                    logging.debug(f"{self} sending heartbeat to {node}")
                     self.network.send(self.node_id,
                                       node.request_heartbeat,
                                       node_id=self.node_id,
@@ -250,9 +282,10 @@ class Node:
                                       role=self.role)
 
     def request_heartbeat(self, node_id: int, term: int, role: Role) -> None:
-        self.monitor.received_ping(node_id=node_id, role=role, term=term)
+        self.monitor.received_ping(
+            node_id=node_id, role=role, term=term, ts=self.clock.now())
         node = self.nodes[node_id]
-        logging.info(f"{self} got heartbeat from {node}")
+        logging.debug(f"{self} got heartbeat from {node}")
         self.network.send(self.node_id,
                           node.reply_to_heartbeat,
                           node_id=self.node_id,
@@ -260,9 +293,10 @@ class Node:
                           role=self.role)
 
     def reply_to_heartbeat(self, node_id: int, term: int, role: Role) -> None:
-        self.monitor.received_ping(node_id=node_id, role=role, term=term)
+        self.monitor.received_ping(
+            node_id=node_id, role=role, term=term, ts=self.clock.now())
         node = self.nodes[node_id]
-        logging.info(f"{self} got heartbeat reply from {node}")
+        logging.debug(f"{self} got heartbeat reply from {node}")
 
     def become_candidate(self) -> None:
         if self.role is not Role.SECONDARY:
@@ -326,13 +360,14 @@ class Node:
             if len(self.votes_received[term]) > len(self.nodes) / 2:
                 self.role = Role.PRIMARY
                 logging.info(f"{self} elected in term {self.current_term}")
-
-                # TODO: SERVER-77506, commit a majority no-op.
+                # Write a noop.
+                self._write_internal(-1, -1)
 
     def update_secondary_position(self, node_id: int, term: int, log_index: int):
         self.monitor.received_ping(node_id=node_id,
                                    role=Role.SECONDARY,
-                                   term=term)
+                                   term=term,
+                                   ts=self.clock.now())
 
         if self.role is not Role.PRIMARY:
             return
@@ -351,15 +386,48 @@ class Node:
                                   index=self.commit_index)
 
     def update_commit_index(self, node_id: int, term: int, index: int):
-        self.monitor.received_ping(node_id=node_id, role=Role.PRIMARY, term=term)
+        self.monitor.received_ping(
+            node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now())
         self.commit_index = max(self.commit_index, index)
+
+    def has_lease(self) -> bool:
+        if not self.leases_enabled:
+            return True
+
+        if self.role is not Role.PRIMARY or len(self.log) == 0 or self.commit_index < 0:
+            return False
+
+        latest_committed = self.log[self.commit_index]
+        if latest_committed.term < self.current_term:
+            # I haven't committed anything. Incidentally this check fixes SERVER-53813.
+            return False
+
+        now = self.clock.now()
+        if latest_committed.local_ts <= now - self.lease_timeout:
+            # My last committed entry is more than lease_timeout old.
+            return False
+
+        lease_timeout = self.lease_timeout * (1 + self.clock.max_clock_error)
+        # Search committed entries backwards for the latest entry from previous primary.
+        for i in range(self.commit_index - 1, -1, -1):
+            if self.log[i].term < self.current_term:
+                # We found the last entry we got from the previous primary.
+                if self.log[i].local_ts >= now - lease_timeout:
+                    # Previous primary still has the lease.
+                    return False
+
+                # We don't need to check older entries, their local_ts is smaller.
+                break
+
+        return True
 
     def _write_internal(self, key: int, value: int) -> None:
         """Append an oplog entry."""
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        w = Write(key=key, value=value, term=self.current_term, ts=get_current_ts())
+        now = self.clock.now()
+        w = Write(key=key, value=value, term=self.current_term, ts=now, local_ts=now)
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
@@ -368,6 +436,14 @@ class Node:
 
         In detail: append an oplog entry with 'value', wait for w:majority.
         """
+        if self.role is not Role.PRIMARY:
+            raise Exception("Not primary")
+
+        while not self.has_lease():
+            await sleep(1)
+            if self.role is not Role.PRIMARY:
+                raise Exception("Stepped down while waiting for lease")
+
         self._write_internal(key=key, value=value)
         write_index = len(self.log) - 1
         start_ts = get_current_ts()
@@ -395,7 +471,7 @@ class Node:
         self.role = Role.SECONDARY
 
     def _reset_election_deadline(self):
-        self.election_deadline = (get_current_ts() + self.election_timeout
+        self.election_deadline = (self.clock.now() + self.election_timeout
                                   + self.prng.randint(0, self.election_timeout))
 
     def __str__(self) -> str:
@@ -766,7 +842,7 @@ def all_param_combos(raw_params: dict) -> list[DictConfig]:
 
 
 def main():
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     event_loop = get_event_loop()
     csv_writer: None | csv.DictWriter = None
     csv_path = "metrics/metrics.csv"

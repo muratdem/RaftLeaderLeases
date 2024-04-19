@@ -49,9 +49,9 @@ async def await_predicate(predicate):
 
 
 class LeaseRaftTest(SimulatorTestCase):
-    def setUp(self) -> None:
-        super().setUp()
+    async def replica_set_setup(self, **kwargs) -> None:
         self.cfg = DictConfig({
+            "max_clock_error": 0.1,
             "election_timeout": 1000,
             "one_way_latency_mean": 125,
             "one_way_latency_variance": 100,
@@ -62,11 +62,13 @@ class LeaseRaftTest(SimulatorTestCase):
             "stepdown_rate": 50000,
             "partition_rate": 500,
             "heal_rate": 1000,
-            "check_linearizability": True,
             "keyspace_size": 1,
+            "leases_enabled": False,
+            "lease_timeout": 1000,
             "seed": 1,
         })
 
+        self.cfg.update(kwargs)
         self.prng = PRNG(cfg=self.cfg)
         self.network = Network(prng=self.prng, node_ids=[1, 2, 3])
         self.nodes = {
@@ -87,8 +89,10 @@ class LeaseRaftTest(SimulatorTestCase):
             lambda: next((n for n in nodes if n.role == Role.PRIMARY), None))
 
     async def read_from_stale_primary(self,
+                                      leases_enabled: bool,
                                       concern: ReadConcern,
                                       expected_result: list[int]) -> None:
+        await self.replica_set_setup(leases_enabled=leases_enabled)
         primary_A = await self.get_primary()
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
         self.network.make_partition(
@@ -96,7 +100,7 @@ class LeaseRaftTest(SimulatorTestCase):
         primary_B = await self.get_primary(secondaries)
         self.assertIsNot(primary_A, primary_B)
         self.assertEqual(primary_A.role, Role.PRIMARY)
-        await primary_B.write(key=1, value=2)
+        await primary_B.write(key=1, value=1)
         self.assertEqual(await primary_A.read(key=1, concern=concern), expected_result)
 
     async def test_read_concern_local_fails_read_your_writes(self):
@@ -106,13 +110,36 @@ class LeaseRaftTest(SimulatorTestCase):
         # primary B. The client could write to B, then read from A, and not see its
         # write.
         await self.read_from_stale_primary(concern=ReadConcern.LOCAL,
-                                           expected_result=[])
+                                           expected_result=[],
+                                           leases_enabled=False)
 
     async def test_read_concern_majority_fails_linearizability(self):
         # Today, a client using w: "majority", rc: "majority" can fail to read its write
         # (hence fail linearizability) if it reads from a stale primary.
         await self.read_from_stale_primary(concern=ReadConcern.MAJORITY,
-                                           expected_result=[])
+                                           expected_result=[],
+                                           leases_enabled=False)
+
+    async def test_read_concern_local_upholds_read_your_writes(self):
+        with self.assertRaisesRegex(AssertionError, r"Lists differ"):
+            await self.read_from_stale_primary(concern=ReadConcern.LOCAL,
+                                               expected_result=[1],
+                                               leases_enabled=True)
+
+    async def test_read_concern_majority_upholds_linearizability(self):
+        with self.assertRaisesRegex(AssertionError, r"Lists differ"):
+            await self.read_from_stale_primary(concern=ReadConcern.MAJORITY,
+                                               expected_result=[1],
+                                               leases_enabled=True)
+
+    async def test_await_lease(self):
+        await self.replica_set_setup(leases_enabled=True, noop_rate=1e10)
+        primary = await self.get_primary()
+        self.assertFalse(primary.has_lease())
+        # The primary buffers this write until it has acquired a lease.
+        await primary.write(1, 1)
+        self.assertTrue(primary.has_lease())
+        self.assertEqual([1], await primary.read(1, concern=ReadConcern.MAJORITY))
 
 
 if __name__ == '__main__':
