@@ -1,2 +1,2 @@
 write_latency,read_latency,replication_lag,commit_lag,commit_latency,leases_enabled,lease_timeout,max_clock_error,election_timeout,one_way_latency_mean,one_way_latency_variance,noop_rate,heartbeat_rate,operations,interarrival,stepdown_rate,partition_rate,heal_rate,check_linearizability,keyspace_size,seed
-2623.3,2500.0,1698.892857142857,,123.3,True,1000,0.1,1000,125,100,1000,500,50,50,50000,500,1000,True,1,
+3008.8571428571427,2800.0,1598.5454545454545,,204.42857142857142,True,1000,0.1,1000,125,100,1000,500,50,50,50000,500,1000,True,1,
