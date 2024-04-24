@@ -183,6 +183,30 @@ class LeaseRaftTest(SimulatorTestCase):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await primary_A.read(key=1, concern=ReadConcern.MAJORITY)
 
+    async def test_rollback(self):
+        # Nothing to do with leases, just make sure rollback logic works.
+        await self.replica_set_setup(leases_enabled=False)
+        primary_A = await self.get_primary()
+        await primary_A.write(key=1, value=1)
+        secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
+
+        # Partition primary A from the majority, a new primary is elected.
+        self.network.make_partition(
+            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        write_task = self.loop.create_task(
+            "stale primary write", primary_A.write(key=1, value=2))
+        primary_B = await self.get_primary(secondaries)
+
+        # Write to the new primary, heal the partition, old primary steps down.
+        await primary_B.write(key=1, value=3)
+        reply = await primary_B.read(key=1, concern=ReadConcern.MAJORITY)
+        self.assertEqual(reply.value, [1, 3])
+        self.network.reset_partition()
+        with self.assertRaisesRegex(Exception, "Stepped down"):
+            await write_task
+
+        await await_predicate(lambda: primary_A.log == primary_B.log)
+
 
 class LinearizabilityTest(unittest.TestCase):
     def test_invalid(self):

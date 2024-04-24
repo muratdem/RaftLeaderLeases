@@ -4,30 +4,39 @@ from typing import Any, Callable, Coroutine
 from dataclasses import dataclass, field
 
 Timestamp = int
-
+FutureCallback = Callable[[Any, Exception | None], None]
 
 class Future:
     def __init__(self):
-        self.callbacks: list[Callable[[Any], None]] = []
+        self.callbacks: list[FutureCallback] = []
         self.resolved = False
         self.result = None
+        self.exception: Exception | None = None
 
-    def add_done_callback(self, callback: Callable[[Any], None]):
+    def add_done_callback(self, callback: FutureCallback) -> None:
         assert not inspect.iscoroutinefunction(callback), "Use create_task()"
         if self.resolved:
-            callback(self.result)
+            callback(self.result, self.exception)
         else:
             self.callbacks.append(callback)
 
-    def resolve(self, result=None):
+    def resolve(self, result=None) -> None:
         self.resolved = True
         self.result = result
         callbacks = self.callbacks
         self.callbacks = []  # Prevent recursive resolves.
         for c in callbacks:
-            c(result)
+            c(result, None)
 
-    def ignore_future(self):
+    def set_exception(self, exception: Exception) -> None:
+        self.resolved = True
+        self.exception = exception
+        callbacks = self.callbacks
+        self.callbacks = []  # Prevent recursive resolves.
+        for c in callbacks:
+            c(None, exception)
+
+    def ignore_future(self) -> None:
         """To suppress 'coroutine is not awaited' static analysis warning."""
         pass
 
@@ -49,17 +58,25 @@ class _Task(Future):
         super().__init__()
         self.name = name
         self.coro = coro
-        self.step(None)
+        self.step(None, None)
 
     def __str__(self):
         return f"_Task({repr(self.name)}, {self.coro})"
 
-    def step(self, value) -> None:
+    def step(self, value: Any, exception: Exception | None) -> None:
         try:
-            f = self.coro.send(value)
+            if exception is not None:
+                f = self.coro.throw(exception)
+            else:
+                f = self.coro.send(value)
         except StopIteration as e:
             _Task._instances.remove(self)
             self.resolve(e.value)  # Resume coroutines stopped at "await task".
+            return
+        except Exception as e:
+            # The coroutine threw.
+            _Task._instances.remove(self)
+            self.set_exception(e)
             return
 
         assert isinstance(f, Future)
@@ -113,7 +130,7 @@ class EventLoop:
     def run_until_complete(self, future: Future) -> Any:
         assert not self._running
         if not future.resolved:
-            future.add_done_callback(lambda x: self.stop())
+            future.add_done_callback(lambda x, y: self.stop())
             self.run()
 
         return future.result

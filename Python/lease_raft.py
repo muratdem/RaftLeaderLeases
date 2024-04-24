@@ -287,6 +287,7 @@ class Node:
             node_id=node_id, role=role, term=term, ts=self.clock.now())
         node = self.nodes[node_id]
         logging.debug(f"{self} got heartbeat from {node}")
+        self._maybe_stepdown(term)
         self.network.send(self.node_id,
                           node.reply_to_heartbeat,
                           node_id=self.node_id,
@@ -298,6 +299,7 @@ class Node:
             node_id=node_id, role=role, term=term, ts=self.clock.now())
         node = self.nodes[node_id]
         logging.debug(f"{self} got heartbeat reply from {node}")
+        self._maybe_stepdown(term)
 
     def become_candidate(self) -> None:
         if self.role is not Role.SECONDARY:
@@ -322,24 +324,28 @@ class Node:
         granted = True
         if term < self.current_term:
             granted = False
+            logging.debug(f"{self} voting against {candidate_id}, stale term {term}")
 
-        if term > self.current_term and self.role is Role.PRIMARY:
-            self.stepdown()
-
-        self.current_term = max(self.current_term, term)
-        if self.voted_for.get(term) not in (None, candidate_id):
+        self._maybe_stepdown(term)
+        if granted and self.voted_for.get(term) not in (None, candidate_id):
             granted = False
+            logging.debug(
+                f"{self} voting against {candidate_id}, already voted in {term}")
 
         # Raft paper 5.4.1: "If the logs have last entries with different terms, then
         # the log with the later term is more up-to-date. If the logs end with the same
         # term, then whichever log is longer is more up-to-date."
-        if self.log and last_log_term < self.log[-1].term:
+        if granted and self.log and last_log_term < self.log[-1].term:
             granted = False
+            logging.debug(
+                f"{self} voting against {candidate_id}, its last log term is stale")
 
-        if last_log_index < len(self.log) - 1:
+        if granted and last_log_index < len(self.log) - 1:
             granted = False
+            logging.debug(f"{self} voting against {candidate_id}, my log is longer")
 
         if granted:
+            logging.debug(f"{self} voting for {candidate_id}")
             self.voted_for[term] = candidate_id
             self._reset_election_deadline()
 
@@ -350,6 +356,7 @@ class Node:
                           vote_granted=granted)
 
     def receive_vote(self, voter_id: int, term: int, vote_granted: bool) -> None:
+        logging.debug(f"{self} received {vote_granted} vote from {voter_id}")
         if term > self.current_term:
             self.current_term = term
             # Delayed vote reply reveals that we've been superseded.
@@ -370,6 +377,7 @@ class Node:
                                    term=term,
                                    ts=self.clock.now())
 
+        self._maybe_stepdown(term)
         if self.role is not Role.PRIMARY:
             return
 
@@ -389,6 +397,9 @@ class Node:
     def update_commit_index(self, node_id: int, term: int, index: int):
         self.monitor.received_ping(
             node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now())
+        if self._maybe_stepdown(term):
+            return
+
         self.commit_index = max(self.commit_index, index)
 
     def has_lease(self, for_writes: bool) -> bool:
@@ -473,6 +484,13 @@ class Node:
                else self.log[:self.commit_index + 1])
         return ReadReply(ts=get_current_ts(),
                          value=[e.value for e in log if e.key == key])
+
+    def _maybe_stepdown(self, term: int) -> bool:
+        if term > self.current_term:
+            self.current_term = term
+            if self.role is Role.PRIMARY:
+                logging.info(f"{self} stepping down, saw higher term {term}")
+                self.stepdown()
 
     def stepdown(self):
         """Tell this node to become secondary."""
