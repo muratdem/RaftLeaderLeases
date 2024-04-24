@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 Timestamp = int
 FutureCallback = Callable[[Any, Exception | None], None]
 
+
 class Future:
     def __init__(self):
         self.callbacks: list[FutureCallback] = []
