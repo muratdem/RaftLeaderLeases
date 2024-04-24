@@ -436,7 +436,6 @@ class Node:
 
         now = self.clock.now()
         w = Write(key=key, value=value, term=self.current_term, ts=now, local_ts=now)
-        # TODO: sleep N micros to simulate throughput bottleneck
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
