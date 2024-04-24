@@ -44,7 +44,7 @@ class Write:
 
 @dataclass
 class ReadReply:
-    ts: Timestamp
+    absolute_ts: Timestamp
     """Absolute time the read occurred."""
     value: list[int]
 
@@ -481,7 +481,7 @@ class Node:
 
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])
-        return ReadReply(ts=get_current_ts(),
+        return ReadReply(absolute_ts=get_current_ts(),
                          value=[e.value for e in log if e.key == key])
 
     def _maybe_stepdown(self, term: int) -> bool:
@@ -490,6 +490,7 @@ class Node:
             if self.role is Role.PRIMARY:
                 logging.info(f"{self} stepping down, saw higher term {term}")
                 self.stepdown()
+                return True
 
     def stepdown(self):
         """Tell this node to become secondary."""

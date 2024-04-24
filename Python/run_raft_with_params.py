@@ -1,11 +1,9 @@
 import copy
 import csv
-import enum
 import itertools
 import logging
 import time
 from collections import defaultdict
-from dataclasses import dataclass
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -13,44 +11,12 @@ import yaml
 from omegaconf import DictConfig
 from plotly.subplots import make_subplots
 
-from lease_raft import Network, Node, ReadConcern, Role, setup_logging
+from client import ClientLogEntry, client_read, client_write
+from lease_raft import Network, Node, Role, setup_logging
 from prob import PRNG
 from simulate import Timestamp, get_current_ts, get_event_loop, sleep
 
 _logger = logging.getLogger("run")
-
-
-@dataclass
-class ClientLogEntry:
-    class OpType(enum.Enum):
-        ListAppend = enum.auto()
-        Read = enum.auto()
-
-    client_id: int
-    op_type: OpType
-    start_ts: Timestamp
-    """The absolute time when the client sent the request."""
-    absolute_ts: Timestamp
-    """The absolute time when the event occurred. (We're omniscient, we know this.)"""
-    end_ts: Timestamp
-    """The absolute time when the client received reply."""
-    key: int
-    value: int | list[int]
-    success: bool
-
-    @property
-    def duration(self) -> int:
-        assert self.end_ts >= self.start_ts
-        return self.end_ts - self.start_ts
-
-    def __str__(self) -> str:
-        if self.op_type is ClientLogEntry.OpType.ListAppend:
-            return (f"{self.start_ts} -> {self.absolute_ts} -> {self.end_ts}:"
-                    f" write key {self.key}={self.value}"
-                    f" ({'ok' if self.success else 'failed'})")
-
-        return (f"{self.start_ts} -> {self.absolute_ts} -> {self.end_ts}:"
-                f" read key {self.key}={self.value}")
 
 
 async def reader(
@@ -65,25 +31,12 @@ async def reader(
     node = prng.choice(nodes)
     key = prng.random_key()
     _logger.info(f"Client {client_id} reading key {key} from {node}")
-    try:
-        reply = await node.read(key=key, concern=ReadConcern.MAJORITY)
-        latency = get_current_ts() - start_ts
-        _logger.info(f"Client {client_id} read key {key}={reply.value} from {node},"
-                     f" latency={latency}")
-        client_log.append(
-            ClientLogEntry(
-                client_id=client_id,
-                op_type=ClientLogEntry.OpType.Read,
-                start_ts=start_ts,
-                absolute_ts=reply.absolute_ts,
-                end_ts=get_current_ts(),
-                key=key,
-                value=reply.value,
-                success=True
-            )
-        )
-    except Exception as e:
-        _logger.error(f"Client {client_id} failed reading key {key} from {node}: {e}")
+    entry = await client_read(node=node, key=key)
+    if entry.success:
+        _logger.info(f"Client {client_id} read key {key}={entry.value} from {node}")
+        client_log.append(entry)
+    else:
+        _logger.error(f"Failed to read key {key} from {node}: {entry.exception}")
 
 
 async def writer(
@@ -97,39 +50,14 @@ async def writer(
     # Attempt to write to any node.
     node = prng.choice(nodes)
     key = prng.random_key()
-    _logger.info(f"Appending key {key}+={client_id} to {node}")
-    try:
-        absolute_ts = await node.write(key=key, value=client_id)
-        latency = get_current_ts() - start_ts
-        _logger.info(f"Appended key {key}+={client_id}, latency={latency}")
-        client_log.append(
-            ClientLogEntry(
-                client_id=client_id,
-                op_type=ClientLogEntry.OpType.ListAppend,
-                start_ts=start_ts,
-                absolute_ts=absolute_ts,
-                end_ts=get_current_ts(),
-                key=key,
-                value=client_id,
-                success=True
-            )
-        )
-    except Exception as e:
-        _logger.error(f"Failed appending key {key}+={client_id} on {node}: {e}")
-        if str(e) != "Not primary":
-            # Add it to the log, some failed writes commit eventually.
-            client_log.append(
-                ClientLogEntry(
-                    client_id=client_id,
-                    op_type=ClientLogEntry.OpType.ListAppend,
-                    start_ts=start_ts,
-                    absolute_ts=get_current_ts(),
-                    end_ts=get_current_ts(),
-                    key=key,
-                    value=client_id,
-                    success=False
-                )
-            )
+    _logger.info(f"Client {client_id} appending key {key}+={client_id} to {node}")
+    entry = await client_write(node=node, key=key, value=client_id)
+    client_log.append(entry)
+    if entry.success:
+        _logger.info(f"Client {client_id} appended key {key}+={client_id}")
+    else:
+        _logger.error(
+            f"Failed appending key {key}+={client_id} on {node}: {entry.exception}")
 
 
 async def stepdown_nemesis(nodes: dict[int, Node],

@@ -213,7 +213,6 @@ class LinearizabilityTest(unittest.TestCase):
         with self.assertRaisesRegex(Exception, "not linearizable"):
             do_linearizability_check([
                 ClientLogEntry(
-                    client_id=1,
                     op_type=ClientLogEntry.OpType.ListAppend,
                     start_ts=1,
                     absolute_ts=2,
@@ -223,7 +222,6 @@ class LinearizabilityTest(unittest.TestCase):
                     success=True
                 ),
                 ClientLogEntry(
-                    client_id=1,
                     op_type=ClientLogEntry.OpType.ListAppend,
                     start_ts=4,
                     absolute_ts=5,
@@ -233,7 +231,6 @@ class LinearizabilityTest(unittest.TestCase):
                     success=True
                 ),
                 ClientLogEntry(
-                    client_id=3,
                     op_type=ClientLogEntry.OpType.Read,
                     start_ts=6,
                     absolute_ts=7,
@@ -245,7 +242,6 @@ class LinearizabilityTest(unittest.TestCase):
 
     def test_simultaneous_events(self):
         event_1 = ClientLogEntry(
-            client_id=1,
             op_type=ClientLogEntry.OpType.ListAppend,
             start_ts=1,
             absolute_ts=2,
@@ -255,7 +251,6 @@ class LinearizabilityTest(unittest.TestCase):
             success=True
         )
         event_2 = ClientLogEntry(
-            client_id=2,
             op_type=ClientLogEntry.OpType.ListAppend,
             start_ts=1,
             absolute_ts=2,  # Same time as event_1.
@@ -265,7 +260,6 @@ class LinearizabilityTest(unittest.TestCase):
             success=True
         )
         read_event = ClientLogEntry(
-            client_id=3,
             op_type=ClientLogEntry.OpType.Read,
             start_ts=3,
             absolute_ts=4,
