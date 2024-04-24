@@ -5,11 +5,12 @@ from unittest import TestCase
 
 from omegaconf import DictConfig
 
+from run_raft_with_params import ClientLogEntry, do_linearizability_check
 from lease_raft import Network, Node, ReadConcern, Role, setup_logging
 from prob import PRNG
 from simulate import get_event_loop, sleep
 
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 
 def simulator_test_func(func):
@@ -140,6 +141,77 @@ class LeaseRaftTest(SimulatorTestCase):
         await primary.write(1, 1)
         self.assertTrue(primary.has_lease())
         self.assertEqual([1], await primary.read(1, concern=ReadConcern.MAJORITY))
+
+class LinearizabilityTest(unittest.TestCase):
+    def test_invalid(self):
+        with self.assertRaisesRegex(Exception, "not linearizable"):
+            do_linearizability_check([
+                ClientLogEntry(
+                    client_id=1,
+                    op_type=ClientLogEntry.OpType.ListAppend,
+                    start_ts=1,
+                    absolute_ts=2,
+                    end_ts=3,
+                    key=1,
+                    value=1,
+                    success=True
+                ),
+                ClientLogEntry(
+                    client_id=1,
+                    op_type=ClientLogEntry.OpType.ListAppend,
+                    start_ts=4,
+                    absolute_ts=5,
+                    end_ts=6,
+                    key=2,
+                    value=1,
+                    success=True
+                ),
+                ClientLogEntry(
+                    client_id=3,
+                    op_type=ClientLogEntry.OpType.Read,
+                    start_ts=6,
+                    absolute_ts=7,
+                    end_ts=8,
+                    key=1,
+                    value=[2, 1],  # Wrong, should be [1, 2].
+                    success=True
+                )])
+
+    def test_simultaneous_events(self):
+        event_1 = ClientLogEntry(
+            client_id=1,
+            op_type=ClientLogEntry.OpType.ListAppend,
+            start_ts=1,
+            absolute_ts=2,
+            end_ts=2,
+            key=1,
+            value=1,
+            success=True
+        )
+        event_2 = ClientLogEntry(
+            client_id=2,
+            op_type=ClientLogEntry.OpType.ListAppend,
+            start_ts=1,
+            absolute_ts=2,  # Same time as event_1.
+            end_ts=2,
+            key=1,
+            value=2,
+            success=True
+        )
+        read_event = ClientLogEntry(
+            client_id=3,
+            op_type=ClientLogEntry.OpType.Read,
+            start_ts=3,
+            absolute_ts=4,
+            end_ts=4,
+            key=1,
+            value=[1, 2],  # The value if event_1 happened first.
+            success=True
+        )
+        log = [event_1, event_2, read_event]
+        do_linearizability_check(log)  # History is valid if event_1 was first.
+        read_event.value = [2, 1]  # The value if event_2 happened first.
+        do_linearizability_check(log)  # History is valid if event_2 was first.
 
 
 if __name__ == '__main__':

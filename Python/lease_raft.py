@@ -42,6 +42,13 @@ class Write:
         return entry
 
 
+@dataclass
+class ReadReply:
+    ts: Timestamp
+    """Absolute time the read occurred."""
+    value: list[int]
+
+
 class Metrics:
     def __init__(self):
         self._totals = Counter()
@@ -188,6 +195,7 @@ class Node:
         while True:
             await sleep(self.noop_rate)
             if self.role is Role.PRIMARY:
+                _logger.info(f"{self} writing noop")
                 self._write_internal(-1, -1)
 
     def _maybe_rollback(self, sync_source: "Node"):
@@ -424,10 +432,12 @@ class Node:
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
-    async def write(self, key: int, value: int):
+    async def write(self, key: int, value: int) -> Timestamp:
         """Append value to the list associated with key.
 
         In detail: append an oplog entry with 'value', wait for w:majority.
+
+        Return absolute time write was committed on this node.
         """
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
@@ -447,9 +457,13 @@ class Node:
 
         commit_latency = get_current_ts() - start_ts
         self.metrics.update("commit_latency", commit_latency)
+        return get_current_ts()
 
-    async def read(self, key: int, concern: ReadConcern) -> list[int]:
-        """Return a key's latest value, which is the list of values appended."""
+    async def read(self, key: int, concern: ReadConcern) -> ReadReply:
+        """Get a key's latest value, which is the list of values appended.
+
+        Return absolute time read occurred, and list of values.
+        """
         # We're not testing any consistency guarantees for secondary reads in this
         # simulation, so assume all queries have readPreference: "primary".
         if self.role is not Role.PRIMARY:
@@ -457,7 +471,8 @@ class Node:
 
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])
-        return [e.value for e in log if e.key == key]
+        return ReadReply(ts=get_current_ts(),
+                         value=[e.value for e in log if e.key == key])
 
     def stepdown(self):
         """Tell this node to become secondary."""

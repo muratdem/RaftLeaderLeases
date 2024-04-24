@@ -29,7 +29,11 @@ class ClientLogEntry:
     client_id: int
     op_type: OpType
     start_ts: Timestamp
+    """The absolute time when the client sent the request."""
+    absolute_ts: Timestamp
+    """The absolute time when the event occurred. (We're omniscient, we know this.)"""
     end_ts: Timestamp
+    """The absolute time when the client received reply."""
     key: int
     value: int | list[int]
     success: bool
@@ -41,11 +45,12 @@ class ClientLogEntry:
 
     def __str__(self) -> str:
         if self.op_type is ClientLogEntry.OpType.ListAppend:
-            return (f"{self.start_ts} -> {self.end_ts}:"
+            return (f"{self.start_ts} -> {self.absolute_ts} -> {self.end_ts}:"
                     f" write key {self.key}={self.value}"
                     f" ({'ok' if self.success else 'failed'})")
 
-        return f"{self.start_ts} -> {self.end_ts}: read key {self.key}={self.value}"
+        return (f"{self.start_ts} -> {self.absolute_ts} -> {self.end_ts}:"
+                f" read key {self.key}={self.value}")
 
 
 async def reader(
@@ -61,19 +66,19 @@ async def reader(
     key = prng.random_key()
     _logger.info(f"Client {client_id} reading key {key} from {node}")
     try:
-        value: list[int] = await node.read(key=key, concern=ReadConcern.MAJORITY)
+        reply = await node.read(key=key, concern=ReadConcern.MAJORITY)
         latency = get_current_ts() - start_ts
-        _logger.info(
-            f"Client {client_id} read key {key}={value} from {node}, latency={latency}"
-        )
+        _logger.info(f"Client {client_id} read key {key}={reply.value} from {node},"
+                     f" latency={latency}")
         client_log.append(
             ClientLogEntry(
                 client_id=client_id,
                 op_type=ClientLogEntry.OpType.Read,
                 start_ts=start_ts,
+                absolute_ts=reply.absolute_ts,
                 end_ts=get_current_ts(),
                 key=key,
-                value=value,
+                value=reply.value,
                 success=True
             )
         )
@@ -94,7 +99,7 @@ async def writer(
     key = prng.random_key()
     _logger.info(f"Appending key {key}+={client_id} to {node}")
     try:
-        await node.write(key=key, value=client_id)
+        absolute_ts = await node.write(key=key, value=client_id)
         latency = get_current_ts() - start_ts
         _logger.info(f"Appended key {key}+={client_id}, latency={latency}")
         client_log.append(
@@ -102,6 +107,7 @@ async def writer(
                 client_id=client_id,
                 op_type=ClientLogEntry.OpType.ListAppend,
                 start_ts=start_ts,
+                absolute_ts=absolute_ts,
                 end_ts=get_current_ts(),
                 key=key,
                 value=client_id,
@@ -117,6 +123,7 @@ async def writer(
                     client_id=client_id,
                     op_type=ClientLogEntry.OpType.ListAppend,
                     start_ts=start_ts,
+                    absolute_ts=get_current_ts(),
                     end_ts=get_current_ts(),
                     key=key,
                     value=client_id,
@@ -135,7 +142,7 @@ async def stepdown_nemesis(nodes: dict[int, Node],
             continue
 
         primary = prng.choice(primaries)
-        logging.info(f"Stepping down {primary}")
+        _logger.info(f"Stepping down {primary}")
         primary.stepdown()
 
 
@@ -183,15 +190,13 @@ def chart_metrics(raw_params: dict, csv_path: str):
 
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
-    """Throw exception if "client_log" is not linearizable.
-
-    Based on Lowe, "Testing for Linearizability", 2016, which summarizes Wing & Gong,
-    "Testing and Verifying Concurrent Objects", 1993. Don't do Lowe's memoization trick.
-    """
-
-    logging.info("Checking linearizability. Log:")
-    for entry in sorted(client_log, key=lambda e: e.start_ts):
-        logging.info(entry)
+    """Throw exception if "client_log" is not linearizable."""
+    # We're omniscient, we know the absolute time each event occurred, so we don't need
+    # a costly checking algorithm. Just sort by the absolute times.
+    sorted_log = sorted(client_log, key=lambda e: e.absolute_ts)
+    _logger.info("Checking linearizability. Log:")
+    for entry in sorted_log:
+        _logger.info(entry)
 
     def linearize(
         log: list[ClientLogEntry], model: defaultdict[int, list[int]]
@@ -203,13 +208,11 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
         if len(log) == 0:
             return log  # Empty history is already linearized.
 
-        for i, entry in enumerate(log):
+        # If there are simultaneous events, try ordering any linearization of them.
+        first_entries = [e for e in log if e.absolute_ts == log[0].absolute_ts]
+        for i, entry in enumerate(first_entries):
             # Try linearizing "entry" at history's start. No other entry's end can
             # precede this entry's start.
-            if any(e for e in log if e is not entry and e.end_ts < entry.start_ts):
-                # "entry" can't be linearized first, because e finished earlier.
-                continue
-
             log_prime = log.copy()
             log_prime.pop(i)
 
@@ -217,7 +220,8 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
             if entry.op_type is ClientLogEntry.OpType.ListAppend and not entry.success:
                 linearization = linearize(log_prime, model)
                 if linearization is not None:
-                    return [entry] + linearization
+                    # Omit entry entirely from the linearization.
+                    return linearization
 
             # Assume the write succeeded. Even if !success it might eventually commit.
             if entry.op_type is ClientLogEntry.OpType.ListAppend:
@@ -240,10 +244,8 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
 
         return None
 
-    _logger.info("Checking linearizability....")
     check_start = time.monotonic()
-    # Sort by start_ts to make the search succeed sooner.
-    result = linearize(sorted(client_log, key=lambda y: y.start_ts), defaultdict(list))
+    result = linearize(sorted_log, defaultdict(list))
     check_duration = time.monotonic() - check_start
     if result is None:
         _logger.info(f"Failed to linearize {len(client_log)} entries after"
