@@ -391,34 +391,30 @@ class Node:
             node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now())
         self.commit_index = max(self.commit_index, index)
 
-    def has_lease(self) -> bool:
-        if not self.leases_enabled:
-            return True
-
+    def has_lease(self, for_writes: bool) -> bool:
         if self.role is not Role.PRIMARY or len(self.log) == 0 or self.commit_index < 0:
             return False
 
-        latest_committed = self.log[self.commit_index]
-        if latest_committed.term < self.current_term:
-            # I haven't committed anything. Incidentally this check fixes SERVER-53813.
+        lease_timeout_with_slop = self.lease_timeout * (1 + self.clock.max_clock_error)
+        lease_start = self.clock.now() - lease_timeout_with_slop
+        committed = self.log[:self.commit_index + 1]
+        if committed[-1].local_ts <= lease_start:
+            # My newest committed entry is before lease timeout, same for older entries.
             return False
 
-        now = self.clock.now()
-        if latest_committed.local_ts <= now - self.lease_timeout:
-            # My last committed entry is more than lease_timeout old.
-            return False
+        if for_writes:
+            if committed[-1].term != self.current_term:
+                # I haven't committed an entry yet. This check fixes SERVER-53813.
+                return False
 
-        lease_timeout = self.lease_timeout * (1 + self.clock.max_clock_error)
-        # Search committed entries backwards for the latest entry from previous primary.
-        for i in range(self.commit_index - 1, -1, -1):
-            if self.log[i].term < self.current_term:
-                # We found the last entry we got from the previous primary.
-                if self.log[i].local_ts >= now - lease_timeout:
-                    # Previous primary still has the lease.
-                    return False
+            # Wait for past leader's lease to expire. (My last committed entry could
+            # be a no-op, which I wrote without a lease.)
+            prior_entry = next(
+                (e for e in reversed(committed) if e.term != self.current_term), None)
 
-                # We don't need to check older entries, their local_ts is smaller.
-                break
+            if prior_entry and prior_entry.local_ts >= lease_start:
+                # Previous leader still has write lease.
+                return False
 
         return True
 
@@ -429,6 +425,7 @@ class Node:
 
         now = self.clock.now()
         w = Write(key=key, value=value, term=self.current_term, ts=now, local_ts=now)
+        # TODO: sleep N micros to simulate throughput bottleneck
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
@@ -442,7 +439,7 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        while not self.has_lease():
+        while self.leases_enabled and not self.has_lease(for_writes=True):
             await sleep(1)
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for lease")
@@ -468,6 +465,9 @@ class Node:
         # simulation, so assume all queries have readPreference: "primary".
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
+
+        if self.leases_enabled and not self.has_lease(for_writes=False):
+            raise Exception("Not leaseholder")
 
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])

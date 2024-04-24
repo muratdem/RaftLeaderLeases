@@ -95,6 +95,8 @@ class LeaseRaftTest(SimulatorTestCase):
                                       expected_result: list[int]) -> None:
         await self.replica_set_setup(leases_enabled=leases_enabled)
         primary_A = await self.get_primary()
+        # Make sure primary A has commit index > -1.
+        await primary_A.write(key=0, value=0)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
         self.network.make_partition(
             set([primary_A.node_id]), set(n.node_id for n in secondaries))
@@ -102,7 +104,8 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertIsNot(primary_A, primary_B)
         self.assertEqual(primary_A.role, Role.PRIMARY)
         await primary_B.write(key=1, value=1)
-        self.assertEqual(await primary_A.read(key=1, concern=concern), expected_result)
+        reply = await primary_A.read(key=1, concern=concern)
+        self.assertEqual(reply.value, expected_result)
 
     async def test_read_concern_local_fails_read_your_writes(self):
         # Today, a client using the default writeConcern of w: "majority" and default
@@ -122,13 +125,13 @@ class LeaseRaftTest(SimulatorTestCase):
                                            leases_enabled=False)
 
     async def test_read_concern_local_upholds_read_your_writes(self):
-        with self.assertRaisesRegex(AssertionError, r"Lists differ"):
+        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.LOCAL,
                                                expected_result=[1],
                                                leases_enabled=True)
 
     async def test_read_concern_majority_upholds_linearizability(self):
-        with self.assertRaisesRegex(AssertionError, r"Lists differ"):
+        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.MAJORITY,
                                                expected_result=[1],
                                                leases_enabled=True)
@@ -136,11 +139,50 @@ class LeaseRaftTest(SimulatorTestCase):
     async def test_await_lease(self):
         await self.replica_set_setup(leases_enabled=True, noop_rate=1e10)
         primary = await self.get_primary()
-        self.assertFalse(primary.has_lease())
+        self.assertFalse(primary.has_lease(for_writes=True))
+        self.assertFalse(primary.has_lease(for_writes=False))
         # The primary buffers this write until it has acquired a lease.
         await primary.write(1, 1)
-        self.assertTrue(primary.has_lease())
-        self.assertEqual([1], await primary.read(1, concern=ReadConcern.MAJORITY))
+        self.assertTrue(primary.has_lease(for_writes=True))
+        self.assertTrue(primary.has_lease(for_writes=False))
+        reply = await primary.read(1, concern=ReadConcern.MAJORITY)
+        self.assertEqual([1], reply.value)
+
+    async def test_read_with_prior_leader_lease(self):
+        # Lease timeout > election timeout, so we have a stale leaseholder.
+        await self.replica_set_setup(leases_enabled=True,
+                                     election_timeout=1000,
+                                     lease_timeout=2000)
+        primary_A = await self.get_primary()
+        # Make sure primary A has commit index > -1.
+        await primary_A.write(key=0, value=0)
+        self.assertTrue(primary_A.has_lease(for_writes=True))
+        self.assertTrue(primary_A.has_lease(for_writes=False))
+        secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
+
+        # Partition primary A from the majority, a new primary is elected.
+        self.network.make_partition(
+            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        primary_B = await self.get_primary(secondaries)
+        self.assertIsNot(primary_A, primary_B)
+        self.assertEqual(primary_A.role, Role.PRIMARY)
+
+        # The new primary can use the old one's lease for reads.
+        self.assertTrue(primary_B.has_lease(for_writes=False))
+        self.assertFalse(primary_B.has_lease(for_writes=True))
+        reply = await primary_A.read(key=0, concern=ReadConcern.MAJORITY)
+        self.assertEqual(reply.value, [0])
+
+        # The write waits for primary B to acquire a writer lease.
+        await primary_B.write(key=1, value=1)
+        reply = await primary_B.read(key=1, concern=ReadConcern.MAJORITY)
+        self.assertEqual(reply.value, [1])
+        self.assertTrue(primary_B.has_lease(for_writes=True))
+        self.assertTrue(primary_B.has_lease(for_writes=False))
+
+        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
+            await primary_A.read(key=1, concern=ReadConcern.MAJORITY)
+
 
 class LinearizabilityTest(unittest.TestCase):
     def test_invalid(self):
