@@ -6,7 +6,7 @@
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 
 CONSTANTS Server
-CONSTANTS Secondary, Primary, Nil, Delta, Epsilon
+CONSTANTS Follower, Leader, Nil, Delta, Epsilon
 
 VARIABLE currentTerm
 VARIABLE state
@@ -76,7 +76,7 @@ ImmediatelyCommitted(e, Q) ==
 UpdateTermsExpr(i, j) ==
     /\ currentTerm[i] > currentTerm[j]
     /\ currentTerm' = [currentTerm EXCEPT ![j] = currentTerm[i]]
-    /\ state' = [state EXCEPT ![j] = Secondary] 
+    /\ state' = [state EXCEPT ![j] = Follower] 
 
 --------------------------------------------------------------------------------
 
@@ -84,10 +84,10 @@ UpdateTermsExpr(i, j) ==
 \* Next state actions.
 \*
 
-\* Node 'i', a primary, handles a new client request and places the entry 
+\* Node 'i', a Leader, handles a new client request and places the entry 
 \* in its log.    
 ClientWrite(i) ==
-    /\ state[i] = Primary
+    /\ state[i] = Leader
     /\ (\/ (lease[i][1]# currentTerm[i] /\ lease[i][2] < clock[i]) \* lease belongs to prev lead and expired
         \/ (lease[i][1]= currentTerm[i] /\ lease[i][2] >= clock[i]) \* lease belongs to me and unexpired
         )
@@ -97,7 +97,7 @@ ClientWrite(i) ==
     /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
 
 ClientRead(i) ==
-    /\ state[i] = Primary
+    /\ state[i] = Leader
     /\ lease[i][2] >= clock[i]
     /\ LET cInd == MaxCommitted(committed).entry[1] 
            l == Len(log[i]) IN
@@ -107,7 +107,7 @@ ClientRead(i) ==
 
 \* Node 'i' gets a new log entry from node 'j'.
 GetEntries(i, j) ==
-    /\ state[i] = Secondary
+    /\ state[i] = Follower
     \* Node j must have more entries than node i.
     /\ Len(log[j]) > Len(log[i])
        \* Ensure that the entry at the last index of node i's log must match the entry at
@@ -131,13 +131,13 @@ GetEntries(i, j) ==
 
 \*  Node 'i' rolls back against the log of node 'j'.  
 RollbackEntries(i, j) ==
-    /\ state[i] = Secondary
+    /\ state[i] = Follower
     /\ CanRollback(i, j)
     \* Roll back one log entry.
     /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
     /\ UNCHANGED <<committed, currentTerm, state, clock, lease, latestRead>>
 
-\* Node 'i' gets elected as a primary.
+\* Node 'i' gets elected as a Leader.
 BecomeLeader(i, voteQuorum) == 
     LET newTerm == currentTerm[i] + 1 IN
     /\ i \in voteQuorum \* The new leader should vote for itself.
@@ -145,18 +145,18 @@ BecomeLeader(i, voteQuorum) ==
     \* Update the terms of each voter.
     /\ currentTerm' = [s \in Server |-> IF s \in voteQuorum THEN newTerm ELSE currentTerm[s]]
     /\ state' = [s \in Server |->
-                    IF s = i THEN Primary
-                    ELSE IF s \in voteQuorum THEN Secondary \* All voters should revert to secondary state.
+                    IF s = i THEN Leader
+                    ELSE IF s \in voteQuorum THEN Follower \* All voters should revert to Follower state.
                     ELSE state[s]]
     /\ UNCHANGED <<log, committed, latestRead, lease, clock>>   
             
-\* Primary 'i' commits its latest log entry.
+\* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
     LET ind == Len(log[i]) IN
     \* Must have some entries to commit.
     /\ ind > 0
     \* This node is leader.
-    /\ state[i] = Primary
+    /\ state[i] = Leader
     \* The entry was written by this leader.
     /\ log[i][ind][1] = currentTerm[i]
     \* all nodes have this log entry and are in the term of the leader.
@@ -170,7 +170,7 @@ CommitEntry(i, commitQuorum) ==
     /\ lease' = [lease EXCEPT ![i] = <<currentTerm[i], log[i][ind][2]+Delta>>]
     /\ UNCHANGED <<currentTerm, state, log, clock>>
 
-\* Action that exchanges terms between two nodes and step down the primary if
+\* Action that exchanges terms between two nodes and step down the Leader if
 \* needed. This can be safely specified as a separate action, rather than
 \* occurring atomically on other replication actions that involve communication
 \* between two nodes. This makes it clearer to see where term propagation is
@@ -187,7 +187,7 @@ Tick(s) ==
 
 Init == 
     /\ currentTerm = [i \in Server |-> 0]
-    /\ state       = [i \in Server |-> Secondary]
+    /\ state       = [i \in Server |-> Follower]
     /\ log = [i \in Server |-> <<>>]
     /\ committed = {}
     /\ clock = [i \in Server |-> 0]
@@ -212,14 +212,14 @@ Spec == Init /\ [][Next]_vars
 \* Correctness properties
 \*
 
-OnePrimaryPerTerm == 
+OneLeaderPerTerm == 
     \A s,t \in Server :
-        (/\ state[s] = Primary 
-         /\ state[t] = Primary
+        (/\ state[s] = Leader 
+         /\ state[t] = Leader
          /\ currentTerm[s] = currentTerm[t]) => (s = t)
 
 LeaderAppendOnly == 
-    [][\A s \in Server : state[s] = Primary => Len(log'[s]) >= Len(log[s])]_vars
+    [][\A s \in Server : state[s] = Leader => Len(log'[s]) >= Len(log[s])]_vars
 
 \* <<index, term>> pairs uniquely identify log prefixes.
 LogMatching == 
@@ -228,9 +228,9 @@ LogMatching ==
         (\E j \in DOMAIN log[t] : i = j /\ log[s][i] = log[t][j]) => 
         (SubSeq(log[s],1,i) = SubSeq(log[t],1,i)) \* prefixes must be the same.
 
-\* When a node gets elected as primary it contains all entries committed in previous terms.
+\* When a node gets elected as Leader it contains all entries committed in previous terms.
 LeaderCompleteness == 
-    \A s \in Server : (state[s] = Primary) => 
+    \A s \in Server : (state[s] = Leader) => 
         \A c \in committed : (c.term < currentTerm[s] => InLog(c.entry, s))
 
 \* If two entries are committed at the same index, they must be the same entry.
