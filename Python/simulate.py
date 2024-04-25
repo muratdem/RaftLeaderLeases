@@ -46,6 +46,10 @@ class Future:
 
     __await__ = __iter__
 
+    def __del__(self):
+        if self.exception:
+            print(f"Future not awaited with exception: {self.exception}")
+
 
 class _Task(Future):
     _instances: set["_Task"] = set()
@@ -115,7 +119,7 @@ class EventLoop:
     def run(self):
         self._running = True
         while self._running:
-            if self._current_ts > 1e6:
+            if self._current_ts > 1e10:
                 _Task.print_all_tasks()
                 raise Exception(f"Timeout, current timestamp is {self._current_ts}")
 
