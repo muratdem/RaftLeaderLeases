@@ -1,18 +1,19 @@
 # A secondary waits election_timeout + exp(election_timeout) to become candidate after it fails
 # to replicate from a primary.
 leases_enabled: true
-lease_timeout: 1000
+lease_timeout: 10000000
 max_clock_error: 0.1  # Max ratio of error to timespan, e.g. 10% error is 0.1.
-election_timeout: 1000
-one_way_latency_mean: 125  # Mean time for a message to go from one replica set node to another.
+election_timeout: 10000000
+one_way_latency_mean: 200  # Mean time for a message to go from one replica set node to another.
 one_way_latency_variance: 100  # Variance for one-way latency, which is lognormal distributed.
-noop_rate: 1000  # How many time units between no-op writes.
-heartbeat_rate: 500  # How many time units between heartbeat messages.
-operations: 500  # How many reads + writes to simulate.
-interarrival: 50  # Mean time between operations, which are Poisson-distributed.
-stepdown_rate: 50000  # Mean time between stepdowns, which are Poisson-distributed.
-partition_rate: 500  # Mean time between partitions, which are Poisson-distributed.
+noop_rate: 1000000  # How many time units between no-op writes.
+heartbeat_rate: 4000000  # How many time units between heartbeat messages.
+operations: 100  # How many reads + writes to simulate.
+interarrival: 50000  # Mean time between operations, which are Poisson-distributed.
+stepdown_rate: # Mean time between stepdowns, which are Poisson-distributed.
+partition_rate: # Mean time between partitions, which are Poisson-distributed.
 heal_rate: 1000  # Mean time to heal a partition, exponentially distributed.
 check_linearizability: true  # Whether to check if the history was linearizable (slow!).
 keyspace_size: 1  # Number of keys. Reads/writes choose keys at random.
+jumpstart_election: true
 seed: # Optional random seed for reproducibility.

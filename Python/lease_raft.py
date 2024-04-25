@@ -50,11 +50,14 @@ class ReadReply:
 
 
 class Metrics:
-    def __init__(self):
+    def __init__(self, metrics_start_ts: Timestamp = 0):
         self._totals = Counter()
         self._sample_counts = Counter()
+        self._metrics_start_ts = metrics_start_ts
 
     def update(self, metric_name: str, sample: int) -> None:
+        if get_current_ts() < self._metrics_start_ts:
+            return
         self._totals[metric_name] += sample
         self._sample_counts[metric_name] += 1
 
@@ -159,6 +162,10 @@ class _NodeClock:
         return next_ts
 
 
+_NOOP = -1
+_BUSY_WAIT = 50
+
+
 class Node:
     def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG, network: Network):
         self.node_id = node_id
@@ -184,7 +191,7 @@ class Node:
         self.noop_rate: int = cfg.noop_rate
         self.election_timeout: int = cfg.election_timeout
         self.heartbeat_rate: int = cfg.heartbeat_rate
-        self.metrics = Metrics()
+        self.metrics = Metrics(metrics_start_ts=cfg.get("metrics_start_ts", 0))
 
     def initiate(self, nodes: dict[int, "Node"]):
         self.nodes = nodes.copy()
@@ -194,11 +201,15 @@ class Node:
         get_event_loop().create_task("heartbeat", self.heartbeat())
 
     async def noop_writer(self):
-        while True:
-            await sleep(self.noop_rate)
-            if self.role is Role.PRIMARY:
-                _logger.info(f"{self} writing noop")
-                self._write_internal(-1, -1)
+        try:
+            while True:
+                await sleep(self.noop_rate)
+                if self.role is Role.PRIMARY:
+                    _logger.info(f"{self} writing noop")
+                    self._write_internal(_NOOP, _NOOP)
+        except Exception as e:
+            _logger.exception(e)
+            raise
 
     def _maybe_rollback(self, sync_source: "Node"):
         # Search backward through source's log for latest entry that matches ours.
@@ -219,81 +230,90 @@ class Node:
                 return
 
     async def replicate(self):
-        self._reset_election_deadline()
-        while True:
-            await sleep(10)
-            if self.role is not Role.SECONDARY:
-                continue
-
-            now = self.clock.now()
-            primary_ids = self.monitor.primaries(
-                min_term=self.current_term,
-                min_ts=now - self.election_timeout)
-
-            if not primary_ids:
-                if self.election_deadline <= now:
-                    self.become_candidate()  # Resets election deadline.
-
-                continue
-
-            sync_source = self.nodes[self.prng.choice(primary_ids)]
-            if not self.network.reachable(self.node_id, sync_source.node_id):
-                logging.debug(f"{self} can't sync from {sync_source}, unreachable")
-                await sleep(100)
-                continue
-
-            self.monitor.received_ping(node_id=sync_source.node_id,
-                                       role=sync_source.role,
-                                       term=sync_source.current_term,
-                                       ts=self.clock.now())
-            if sync_source.current_term < self.current_term:
-                _logger.info(f"{sync_source} stepping down, {self} has higher term")
-                sync_source.stepdown()
-                continue
-
-            self._maybe_rollback(sync_source)
-            if len(self.log) < len(sync_source.log):
-                entry = sync_source.log[len(self.log)]
-                # Simulate waiting for entry to arrive. It may have arrived already.
-                apply_time = entry.ts + self.prng.one_way_latency_value()
-                await sleep(max(0, apply_time - get_current_ts()))
+        try:
+            self._reset_election_deadline()
+            while True:
+                await sleep(_BUSY_WAIT)
                 if self.role is not Role.SECONDARY:
-                    # Elected while waiting.
                     continue
 
-                lag = get_current_ts() - entry.ts
-                _logger.debug(f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
-                self._reset_election_deadline()
-                # Update entry's local_ts, for tracking leases.
-                self.log.append(entry.copy_with_local_ts(self.clock.now()))
-                self.match_index[self.node_id] = len(self.log) - 1
-                self.network.send(self.node_id,
-                                  sync_source.update_secondary_position,
-                                  node_id=self.node_id,
-                                  term=self.current_term,
-                                  log_index=len(self.log) - 1)
-                self.metrics.update("replication_lag", lag)
+                now = self.clock.now()
+                primary_ids = self.monitor.primaries(
+                    min_term=self.current_term,
+                    min_ts=now - self.election_timeout)
 
-    async def heartbeat(self):
-        while True:
-            for node in self.nodes.values():
-                if node is not self:
-                    logging.debug(f"{self} sending heartbeat to {node}")
+                if not primary_ids:
+                    if self.election_deadline <= now:
+                        self.become_candidate()  # Resets election deadline.
+
+                    continue
+
+                sync_source = self.nodes[self.prng.choice(primary_ids)]
+                if not self.network.reachable(self.node_id, sync_source.node_id):
+                    logging.debug(f"{self} can't sync from {sync_source}, unreachable")
+                    await sleep(_BUSY_WAIT)
+                    continue
+
+                self.monitor.received_ping(node_id=sync_source.node_id,
+                                           role=sync_source.role,
+                                           term=sync_source.current_term,
+                                           ts=self.clock.now())
+                if sync_source.current_term < self.current_term:
+                    _logger.info(f"{sync_source} stepping down, {self} has higher term")
+                    sync_source.stepdown()
+                    continue
+
+                self._maybe_rollback(sync_source)
+                if len(self.log) < len(sync_source.log):
+                    entry = sync_source.log[len(self.log)]
+                    # Simulate waiting for entry to arrive. It may have arrived already.
+                    apply_time = entry.ts + self.prng.one_way_latency_value()
+                    await sleep(max(0, apply_time - get_current_ts()))
+                    if self.role is not Role.SECONDARY:
+                        # Elected while waiting.
+                        continue
+
+                    lag = get_current_ts() - entry.ts
+                    _logger.debug(
+                        f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
+                    self._reset_election_deadline()
+                    # Update entry's local_ts, for tracking leases.
+                    self.log.append(entry.copy_with_local_ts(self.clock.now()))
+                    self.match_index[self.node_id] = len(self.log) - 1
                     self.network.send(self.node_id,
-                                      node.request_heartbeat,
+                                      sync_source.update_secondary_position,
                                       node_id=self.node_id,
                                       term=self.current_term,
-                                      role=self.role)
+                                      log_index=len(self.log) - 1)
+                    self.metrics.update("replication_lag", lag)
+        except Exception as e:
+            _logger.exception(e)
+            raise
 
-            next_heartbeat = self.heartbeat_rate
-            primary_ids = self.monitor.primaries(
-                min_term=self.current_term,
-                min_ts=self.clock.now() - self.election_timeout)
-            if self.role is not Role.PRIMARY and not primary_ids:
-                # Try harder to find a primary.
-                next_heartbeat = self.heartbeat_rate // 10
+    async def heartbeat(self):
+        try:
+            while True:
+                for node in self.nodes.values():
+                    if node is not self:
+                        logging.debug(f"{self} sending heartbeat to {node}")
+                        self.network.send(self.node_id,
+                                          node.request_heartbeat,
+                                          node_id=self.node_id,
+                                          term=self.current_term,
+                                          role=self.role)
 
-            await sleep(next_heartbeat)
+                next_heartbeat = self.heartbeat_rate
+                primary_ids = self.monitor.primaries(
+                    min_term=self.current_term,
+                    min_ts=self.clock.now() - self.election_timeout)
+                if self.role is not Role.PRIMARY and not primary_ids:
+                    # Try harder to find a primary.
+                    next_heartbeat = self.heartbeat_rate // 10
+
+                await sleep(next_heartbeat)
+        except Exception as e:
+            _logger.exception(e)
+            raise
 
     def request_heartbeat(self, node_id: int, term: int, role: Role) -> None:
         self.monitor.received_ping(
@@ -463,7 +483,7 @@ class Node:
             raise Exception("Not primary")
 
         while self.leases_enabled and not self.has_lease(for_writes=True):
-            await sleep(10)
+            await sleep(_BUSY_WAIT)
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for lease")
 

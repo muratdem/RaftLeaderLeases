@@ -1,15 +1,10 @@
 import copy
-import csv
-import itertools
 import logging
 import time
 from collections import defaultdict
 
-import pandas as pd
-import plotly.graph_objects as go
 import yaml
 from omegaconf import DictConfig
-from plotly.subplots import make_subplots
 
 from client import ClientLogEntry, client_read, client_write
 from lease_raft import Network, Node, Role, setup_logging
@@ -27,8 +22,8 @@ async def reader(
     prng: PRNG,
 ):
     await sleep(start_ts)
-    # Attempt to read from any node.
-    node = prng.choice(nodes)
+    # Attempt to read from any primary.
+    node = prng.choice([n for n in nodes if n.role == Role.PRIMARY])
     key = prng.random_key()
     _logger.info(f"Client {client_id} reading key {key} from {node}")
     entry = await client_read(node=node, key=key)
@@ -47,8 +42,8 @@ async def writer(
     prng: PRNG,
 ):
     await sleep(start_ts)
-    # Attempt to write to any node.
-    node = prng.choice(nodes)
+    # Attempt to write to any primary.
+    node = prng.choice([n for n in nodes if n.role == Role.PRIMARY])
     key = prng.random_key()
     _logger.info(f"Client {client_id} appending key {key}+={client_id} to {node}")
     entry = await client_write(node=node, key=key, value=client_id)
@@ -70,7 +65,7 @@ async def stepdown_nemesis(nodes: dict[int, Node],
             continue
 
         primary = prng.choice(primaries)
-        _logger.info(f"Stepping down {primary}")
+        _logger.info(f"Nemesis stepping down {primary}")
         primary.stepdown()
 
 
@@ -83,38 +78,6 @@ async def partition_nemesis(network: Network,
         network.make_random_partition()
         await sleep(round(prng.exponential(heal_rate)))
         network.reset_partition()
-
-
-def chart_metrics(raw_params: dict, csv_path: str):
-    df = pd.read_csv(csv_path)
-    y_columns = [
-        "read_latency",
-        "write_latency",
-    ]
-
-    fig = make_subplots(rows=1, cols=1, shared_xaxes=True, vertical_spacing=0.1)
-    fig.update_xaxes(title_text="one-way network latency", row=1, col=1)
-
-    # TODO: read latency vs replication lag for rc:local and rc:linearizable
-    for column in y_columns:
-        fig.add_trace(
-            go.Scatter(
-                x=df["replication_lag"], y=df[column], mode="lines+markers", name=column
-            ),
-            row=1,
-            col=1,
-        )
-
-    fig.update_layout(
-        hovermode="x unified",
-        title=", ".join(f"{k}={v}" for k, v in raw_params.items()),
-    )
-
-    # Draw a vertical line on both charts on mouseover, and don't truncate column names.
-    fig.update_traces(hoverlabel={"namelength": -1}, xaxis="x1")
-    chart_path = "metrics/chart.html"
-    fig.write_html(chart_path)
-    _logger.info(f"Created {chart_path}")
 
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
@@ -203,7 +166,7 @@ def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
     metrics["read_latency"] = read_time / reads if reads else None
 
 
-async def main_coro(params: DictConfig, metrics: dict):
+async def main_coro(params: DictConfig, metrics: dict, jumpstart_election=False):
     _logger.info(params)
     prng = PRNG(cfg=params)
     _logger.info(f"Seed {prng.seed}")
@@ -218,7 +181,10 @@ async def main_coro(params: DictConfig, metrics: dict):
     for n in nodes.values():
         n.initiate(nodes)
 
-    while not any(n.role == Role.PRIMARY for n in nodes.values()):
+    if jumpstart_election:
+        nodes[1].become_candidate()
+
+    while not any(n.commit_index >= 0 for n in nodes.values()):
         await sleep(100)
 
     lp = get_event_loop()
@@ -247,18 +213,20 @@ async def main_coro(params: DictConfig, metrics: dict):
 
         tasks.append(lp.create_task(name=f"client {i}", coro=coro))
 
-    lp.create_task(
-        name="nemesis",
-        coro=stepdown_nemesis(nodes=nodes, prng=prng,
-                              stepdown_rate=params.stepdown_rate)
-    ).ignore_future()
+    if params.stepdown_rate:
+        lp.create_task(
+            name="nemesis",
+            coro=stepdown_nemesis(nodes=nodes, prng=prng,
+                                  stepdown_rate=params.stepdown_rate)
+        ).ignore_future()
 
-    lp.create_task(
-        name="nemesis",
-        coro=partition_nemesis(network=network, prng=prng,
-                               partition_rate=params.partition_rate,
-                               heal_rate=params.heal_rate)
-    ).ignore_future()
+    if params.partition_rate:
+        lp.create_task(
+            name="nemesis",
+            coro=partition_nemesis(network=network, prng=prng,
+                                   partition_rate=params.partition_rate,
+                                   heal_rate=params.heal_rate)
+        ).ignore_future()
 
     for t in tasks:
         await t
@@ -280,44 +248,17 @@ async def main_coro(params: DictConfig, metrics: dict):
         do_linearizability_check(client_log)
 
 
-def all_param_combos(raw_params: dict) -> list[DictConfig]:
-    param_combos: dict[str, list] = {}
-    # Load config file, keep all values as strings.
-    for k, v in raw_params.items():
-        v_interpreted = eval(str(v))
-        try:
-            iter(v_interpreted)
-        except TypeError:
-            param_combos[k] = [v_interpreted]
-        else:
-            param_combos[k] = list(v_interpreted)
-
-    for values in itertools.product(*param_combos.values()):
-        yield DictConfig(dict(zip(param_combos.keys(), values)))
-
-
 def main():
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
+    params = DictConfig(yaml.safe_load(open("params.yaml")))
+    metrics = {}
     event_loop = get_event_loop()
-    csv_writer: None | csv.DictWriter = None
-    csv_path = "metrics/metrics.csv"
-    csv_file = open(csv_path, "w+")
-    raw_params = yaml.safe_load(open("params.yaml"))
-    for params in all_param_combos(raw_params):
-        metrics = {}
-        event_loop.create_task("main", main_coro(params=params, metrics=metrics))
-        event_loop.run()
-        _logger.info(f"metrics: {metrics}")
-        stats = metrics | dict(params)
-        if csv_writer is None:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=stats.keys())
-            csv_writer.writeheader()
-
-        csv_writer.writerow(stats)
-        event_loop.reset()
-
-    csv_file.close()
-    chart_metrics(raw_params=raw_params, csv_path=csv_path)
+    event_loop.create_task("main", main_coro(
+        params=params,
+        metrics=metrics,
+        jumpstart_election=params.get("jumpstart_election")))
+    event_loop.run()
+    _logger.info(f"metrics: {metrics}")
 
 
 if __name__ == "__main__":
