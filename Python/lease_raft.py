@@ -82,12 +82,14 @@ class Network:
         to_id = method.__self__.node_id
         assert to_id in self.node_ids
         if self.reachable(from_id, to_id):
+            s = ", ".join([a for a in args] + [f"{k}={v}" for k, v in kwargs.items()])
+            _logger.debug(f"{from_id} -> {to_id}: {method.__name__}({s})")
             get_event_loop().call_later(self.prng.one_way_latency_value(),
                                         method,
                                         *args,
                                         **kwargs)
         else:
-            logging.debug(f"Drop {method.__name__} call from {from_id} to {to_id}")
+            _logger.debug(f"{from_id} -> {to_id}: {method.__name__} DROPPED")
 
     def make_partition(self,
                        left_partition: set[int],
@@ -219,7 +221,7 @@ class Node:
     async def replicate(self):
         self._reset_election_deadline()
         while True:
-            await sleep(1)
+            await sleep(10)
             if self.role is not Role.SECONDARY:
                 continue
 
@@ -259,6 +261,8 @@ class Node:
                     # Elected while waiting.
                     continue
 
+                lag = get_current_ts() - entry.ts
+                _logger.debug(f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
                 self._reset_election_deadline()
                 # Update entry's local_ts, for tracking leases.
                 self.log.append(entry.copy_with_local_ts(self.clock.now()))
@@ -268,11 +272,10 @@ class Node:
                                   node_id=self.node_id,
                                   term=self.current_term,
                                   log_index=len(self.log) - 1)
-                self.metrics.update("replication_lag", get_current_ts() - entry.ts)
+                self.metrics.update("replication_lag", lag)
 
     async def heartbeat(self):
         while True:
-            await sleep(self.heartbeat_rate)
             for node in self.nodes.values():
                 if node is not self:
                     logging.debug(f"{self} sending heartbeat to {node}")
@@ -281,6 +284,16 @@ class Node:
                                       node_id=self.node_id,
                                       term=self.current_term,
                                       role=self.role)
+
+            next_heartbeat = self.heartbeat_rate
+            primary_ids = self.monitor.primaries(
+                min_term=self.current_term,
+                min_ts=self.clock.now() - self.election_timeout)
+            if self.role is not Role.PRIMARY and not primary_ids:
+                # Try harder to find a primary.
+                next_heartbeat = self.heartbeat_rate // 10
+
+            await sleep(next_heartbeat)
 
     def request_heartbeat(self, node_id: int, term: int, role: Role) -> None:
         self.monitor.received_ping(
@@ -450,7 +463,7 @@ class Node:
             raise Exception("Not primary")
 
         while self.leases_enabled and not self.has_lease(for_writes=True):
-            await sleep(1)
+            await sleep(10)
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for lease")
 
@@ -458,7 +471,7 @@ class Node:
         write_index = len(self.log) - 1
         start_ts = get_current_ts()
         while self.commit_index < write_index:
-            await sleep(1)
+            await sleep(10)
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for w:majority")
 
