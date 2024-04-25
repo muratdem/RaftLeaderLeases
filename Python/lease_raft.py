@@ -35,10 +35,13 @@ class Write:
     """Timestamp from originating primary's clock."""
     local_ts: Timestamp = field(compare=False)
     """Timestamp at this server's clock."""
+    committed_at_absolute_ts: Timestamp | None = field(compare=False, default=None)
+    """Absolute timestamp at which this node learned this write was committed."""
 
     def copy_with_local_ts(self, local_ts: Timestamp) -> "Write":
         entry = copy.copy(self)
         entry.local_ts = local_ts
+        entry.committed_at_absolute_ts = None
         return entry
 
 
@@ -402,7 +405,15 @@ class Node:
                 self.role = Role.PRIMARY
                 logging.info(f"{self} elected in term {self.current_term}")
                 # Write a noop.
-                self._write_internal(-1, -1)
+                self._write_internal(_NOOP, _NOOP)
+
+    def _update_commit_index(self, index: int) -> None:
+        self.commit_index = max(self.commit_index, index)
+        for i in range(self.commit_index, -1, -1):
+            if self.log[i].committed_at_absolute_ts is not None:
+                break
+
+            self.log[i].committed_at_absolute_ts = get_current_ts()
 
     def update_secondary_position(self, node_id: int, term: int, log_index: int):
         self.monitor.received_ping(node_id=node_id,
@@ -414,11 +425,8 @@ class Node:
         if self.role is not Role.PRIMARY:
             return
 
-        # TODO: what about an out-of-order message? Is max() below the right solution?
         self.match_index[node_id] = log_index
-        self.commit_index = max(self.commit_index,
-                                statistics.median(self.match_index.values()))
-
+        self._update_commit_index(statistics.median(self.match_index.values()))
         for n in self.nodes.values():
             if n is not self:
                 self.network.send(self.node_id,
@@ -432,8 +440,7 @@ class Node:
             node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now())
         if self._maybe_stepdown(term):
             return
-
-        self.commit_index = max(self.commit_index, index)
+        self._update_commit_index(index)
 
     def has_lease(self, for_writes: bool) -> bool:
         if self.role is not Role.PRIMARY or len(self.log) == 0 or self.commit_index < 0:
@@ -472,6 +479,12 @@ class Node:
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
+    async def _await_commit_index(self, index: int) -> None:
+        while self.commit_index < index:
+            await sleep(_BUSY_WAIT)
+            if self.role is not Role.PRIMARY:
+                raise Exception("Stepped down while waiting for w:majority")
+
     async def write(self, key: int, value: int) -> Timestamp:
         """Append value to the list associated with key.
 
@@ -490,14 +503,13 @@ class Node:
         self._write_internal(key=key, value=value)
         write_index = len(self.log) - 1
         start_ts = get_current_ts()
-        while self.commit_index < write_index:
-            await sleep(10)
-            if self.role is not Role.PRIMARY:
-                raise Exception("Stepped down while waiting for w:majority")
-
+        await self._await_commit_index(index=write_index)
         commit_latency = get_current_ts() - start_ts
         self.metrics.update("commit_latency", commit_latency)
-        return get_current_ts()
+
+        committed_at_absolute_ts = self.log[write_index].committed_at_absolute_ts
+        assert committed_at_absolute_ts is not None
+        return committed_at_absolute_ts
 
     async def read(self, key: int, concern: ReadConcern) -> ReadReply:
         """Get a key's latest value, which is the list of values appended.
