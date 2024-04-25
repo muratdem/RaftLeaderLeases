@@ -45,7 +45,7 @@ class ClientLogEntry:
 async def client_read(node: Node, key: int) -> ClientLogEntry:
     start_ts = get_current_ts()
     try:
-        reply = await node.read(key=key, concern=ReadConcern.MAJORITY)
+        reply = await node.read(key=key, concern=ReadConcern.LINEARIZABLE)
         return ClientLogEntry(op_type=ClientLogEntry.OpType.Read,
                               start_ts=start_ts,
                               absolute_ts=reply.absolute_ts,

@@ -22,6 +22,7 @@ class Role(enum.Enum):
 class ReadConcern(enum.Enum):
     LOCAL = enum.auto()
     MAJORITY = enum.auto()
+    LINEARIZABLE = enum.auto()
 
 
 @dataclass
@@ -524,8 +525,15 @@ class Node:
         if self.leases_enabled and not self.has_lease(for_writes=False):
             raise Exception("Not leaseholder")
 
+        # MAJORITY and LINEARIZABLE read at the majority-commit index.
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])
+
+        if concern is ReadConcern.LINEARIZABLE and not self.leases_enabled:
+            # Commit a noop.
+            self._write_internal(key=_NOOP, value=_NOOP)
+            await self._await_commit_index(index=len(self.log) - 1)
+
         return ReadReply(absolute_ts=get_current_ts(),
                          value=[e.value for e in log if e.key == key])
 
