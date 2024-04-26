@@ -20,7 +20,8 @@ def chart_network_latency():
             xlabel="one-way network latency (μs)",
             ylabel="microseconds")
 
-    bar_width = 30
+    barwidth = 30
+    linewidth = 2
 
     for df, ax in [(df_no_lease, ax1),
                    (df_lease, ax2)]:
@@ -29,16 +30,21 @@ def chart_network_latency():
         for spine in ax.spines.values():
             spine.set_visible(False)
         for i, column in enumerate(columns):
-            rects = ax.bar(df_lease["one_way_latency_mean"] + i * bar_width,
-                           df[column],
-                           bar_width,
-                           label=column)
+            is_zeros = (df[column] == 0).all()
+            rects = ax.bar(
+                df_lease["one_way_latency_mean"] + i * (barwidth + linewidth * 2),
+                df[column],
+                barwidth,
+                label=column,
+                color=f"C{i}",
+                edgecolor=f"C{i}",
+                linewidth=linewidth)
 
-            if (df[column] == 0).all():
+            if is_zeros:
                 ax.bar_label(rects, padding=3)
 
-    ax1.legend(loc="center right")
-    ax2.legend(loc="center right")
+    ax1.legend(loc="center right", framealpha=1, fancybox=False)
+    ax2.legend(loc="center right", framealpha=1, fancybox=False)
     plt.tight_layout()
     chart_path = "metrics/network_latency_experiment.pdf"
     fig.savefig(chart_path)
