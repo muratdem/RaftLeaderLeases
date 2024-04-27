@@ -5,6 +5,9 @@ import pandas as pd
 
 _logger = logging.getLogger("chart")
 
+BARWIDTH = 30
+LINEWIDTH = 2
+
 
 def chart_network_latency():
     df = pd.read_csv("metrics/network_latency_experiment.csv")
@@ -20,9 +23,6 @@ def chart_network_latency():
             xlabel="one-way network latency (μs)",
             ylabel="microseconds")
 
-    barwidth = 30
-    linewidth = 2
-
     for df, ax in [(df_no_lease, ax1),
                    (df_lease, ax2)]:
         ax.set_ylim(-0.05 * max_y, 1.05 * max_y)
@@ -32,13 +32,13 @@ def chart_network_latency():
         for i, column in enumerate(columns):
             is_zeros = (df[column] == 0).all()
             rects = ax.bar(
-                df_lease["one_way_latency_mean"] + i * (barwidth + linewidth * 2),
+                df_lease["one_way_latency_mean"] + i * (BARWIDTH + LINEWIDTH * 2),
                 df[column],
-                barwidth,
+                BARWIDTH,
                 label=column,
                 color=f"C{i}",
                 edgecolor=f"C{i}",
-                linewidth=linewidth)
+                linewidth=LINEWIDTH)
 
             if is_zeros:
                 ax.bar_label(rects, padding=3)
@@ -51,6 +51,53 @@ def chart_network_latency():
     _logger.info(f"Created {chart_path}")
 
 
+def chart_unavailability():
+    df_csv = pd.read_csv("metrics/unavailability_experiment.csv")
+
+    def resample_data(df_micros):
+        # Convert absolute_ts from microseconds to seconds.
+        df_micros["seconds"] = pd.to_datetime(df_micros["absolute_ts"], unit="us")
+        # Resample to calculate sums per second.
+        resampled = df_micros.resample("s", on="seconds").sum()
+        return resampled[["reads", "writes"]]
+
+    df_no_lease = resample_data(
+        df_csv[df_csv["leases_enabled"] == False].copy())
+    df_unoptimized = resample_data(
+        df_csv[(df_csv["leases_enabled"] == True)
+               & (df_csv["read_lease_optimization_enabled"] == False)].copy())
+    df_optimized = resample_data(
+        df_csv[df_csv["read_lease_optimization_enabled"] == True].copy())
+
+    columns = ["reads", "writes"]
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, sharey=True)
+    ax1.set(title="Throughput without leases",
+            ylabel="Ops/sec")
+    ax2.set(title="Throughput without read lease optimization",
+            ylabel="Ops/sec")
+    ax3.set(title="Throughput with read lease optimization",
+            ylabel="Ops/sec",
+            xlabel="Seconds")
+
+    for df, ax in [(df_no_lease, ax1),
+                   (df_unoptimized, ax2),
+                   (df_optimized, ax3)]:
+        # Remove borders
+        for spine in ax.spines.values():
+            spine.set_visible(False)
+
+        for i, column in enumerate(columns):
+            ax.plot(df.index.second, df[column], label=column)
+
+    ax1.legend(loc="center", framealpha=1, fancybox=False)
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.4)
+    chart_path = "metrics/unavailability_experiment.pdf"
+    fig.savefig(chart_path)
+    _logger.info(f"Created {chart_path}")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     chart_network_latency()
+    chart_unavailability()

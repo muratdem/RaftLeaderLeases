@@ -138,6 +138,8 @@ class EventLoop:
             future.add_done_callback(lambda x, y: self.stop())
             self.run()
 
+        if future.exception:
+            raise future.exception
         return future.result
 
     def stop(self):

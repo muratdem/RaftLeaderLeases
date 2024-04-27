@@ -22,8 +22,13 @@ async def reader(
     prng: PRNG,
 ):
     await sleep(start_ts)
+    primaries = [n for n in nodes if n.role == Role.PRIMARY]
+    if not primaries:
+        _logger.info(f"Reader {client_id} found no primary")
+        return
+
     # Attempt to read from any primary.
-    node = prng.choice([n for n in nodes if n.role == Role.PRIMARY])
+    node = prng.choice(primaries)
     key = prng.random_key()
     _logger.info(f"Client {client_id} reading key {key} from {node}")
     entry = await client_read(node=node, key=key)
@@ -42,8 +47,13 @@ async def writer(
     prng: PRNG,
 ):
     await sleep(start_ts)
+    primaries = [n for n in nodes if n.role == Role.PRIMARY]
+    if not primaries:
+        _logger.info(f"Writer {client_id} found no primary")
+        return
+
     # Attempt to write to any primary.
-    node = prng.choice([n for n in nodes if n.role == Role.PRIMARY])
+    node = prng.choice(primaries)
     key = prng.random_key()
     _logger.info(f"Client {client_id} appending key {key}+={client_id} to {node}")
     entry = await client_write(node=node, key=key, value=client_id)
@@ -166,7 +176,9 @@ def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
     metrics["read_latency"] = read_time / reads if reads else None
 
 
-async def main_coro(params: DictConfig, metrics: dict, jumpstart_election=False):
+async def main_coro(params: DictConfig, jumpstart_election=False) -> dict:
+    """Run the simulation, return metrics."""
+    metrics = {}
     _logger.info(params)
     prng = PRNG(cfg=params)
     _logger.info(f"Seed {prng.seed}")
@@ -247,17 +259,16 @@ async def main_coro(params: DictConfig, metrics: dict, jumpstart_election=False)
     if params.check_linearizability:
         do_linearizability_check(client_log)
 
+    return metrics
+
 
 def main():
     logging.basicConfig(level=logging.DEBUG)
     params = DictConfig(yaml.safe_load(open("params.yaml")))
-    metrics = {}
     event_loop = get_event_loop()
-    event_loop.create_task("main", main_coro(
+    metrics = event_loop.run_until_complete(event_loop.create_task("main", main_coro(
         params=params,
-        metrics=metrics,
-        jumpstart_election=params.get("jumpstart_election")))
-    event_loop.run()
+        jumpstart_election=params.get("jumpstart_election"))))
     _logger.info(f"metrics: {metrics}")
 
 
