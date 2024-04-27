@@ -179,6 +179,7 @@ class Node:
         self.network = network
         self.monitor = _Monitor()
         self.leases_enabled: bool = cfg.leases_enabled
+        self.read_lease_optimization_enabled = cfg.read_lease_optimization_enabled
         self.lease_timeout: int = cfg.lease_timeout
         # Raft state (Raft paper p. 4).
         self.current_term = 0
@@ -237,8 +238,8 @@ class Node:
         try:
             self._reset_election_deadline()
             while True:
-                await sleep(_BUSY_WAIT)
                 if self.role is not Role.SECONDARY:
+                    await sleep(_BUSY_WAIT)
                     continue
 
                 now = self.clock.now()
@@ -250,6 +251,7 @@ class Node:
                     if self.election_deadline <= now:
                         self.become_candidate()  # Resets election deadline.
 
+                    await sleep(_BUSY_WAIT)
                     continue
 
                 sync_source = self.nodes[self.prng.choice(primary_ids)]
@@ -268,28 +270,31 @@ class Node:
                     continue
 
                 self._maybe_rollback(sync_source)
-                if len(self.log) < len(sync_source.log):
-                    entry = sync_source.log[len(self.log)]
-                    # Simulate waiting for entry to arrive. It may have arrived already.
-                    apply_time = entry.ts + self.prng.one_way_latency_value()
-                    await sleep(max(0, apply_time - get_current_ts()))
-                    if self.role is not Role.SECONDARY:
-                        # Elected while waiting.
-                        continue
+                if len(self.log) >= len(sync_source.log):
+                    await sleep(_BUSY_WAIT)
+                    continue
 
-                    lag = get_current_ts() - entry.ts
-                    _logger.debug(
-                        f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
-                    self._reset_election_deadline()
-                    # Update entry's local_ts, for tracking leases.
-                    self.log.append(entry.copy_with_local_ts(self.clock.now()))
-                    self.match_index[self.node_id] = len(self.log) - 1
-                    self.network.send(self.node_id,
-                                      sync_source.update_secondary_position,
-                                      node_id=self.node_id,
-                                      term=self.current_term,
-                                      log_index=len(self.log) - 1)
-                    self.metrics.update("replication_lag", lag)
+                entry = sync_source.log[len(self.log)]
+                # Simulate waiting for entry to arrive. It may have arrived already.
+                apply_time = entry.ts + self.prng.one_way_latency_value()
+                await sleep(max(0, apply_time - get_current_ts()))
+                if self.role is not Role.SECONDARY:
+                    # Elected while waiting.
+                    continue
+
+                lag = get_current_ts() - entry.ts
+                _logger.debug(
+                    f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
+                self._reset_election_deadline()
+                # Update entry's local_ts, for tracking leases.
+                self.log.append(entry.copy_with_local_ts(self.clock.now()))
+                self.match_index[self.node_id] = len(self.log) - 1
+                self.network.send(self.node_id,
+                                  sync_source.update_secondary_position,
+                                  node_id=self.node_id,
+                                  term=self.current_term,
+                                  log_index=len(self.log) - 1)
+                self.metrics.update("replication_lag", lag)
         except Exception as e:
             _logger.exception(e)
             raise
