@@ -410,8 +410,12 @@ class Node:
 
     def _update_commit_index(self, index: int) -> None:
         self.commit_index = max(self.commit_index, index)
-        for i in range(self.commit_index, -1, -1):
+        # A secondary can learn of a commit index higher than it has replicated.
+        start_i = min(len(self.log) - 1, self.commit_index)
+        # Reverse-iter, mark when entries became visible to rc:majority on this node.
+        for i in range(start_i, -1, -1):
             if self.log[i].committed_at_absolute_ts is not None:
+                # This entry and all prior have been marked.
                 break
 
             self.log[i].committed_at_absolute_ts = get_current_ts()
