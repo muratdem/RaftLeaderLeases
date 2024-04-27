@@ -556,7 +556,9 @@ class Node:
 
     def stepdown(self):
         """Tell this node to become secondary."""
-        self.role = Role.SECONDARY
+        if self.role is Role.PRIMARY:
+            self.role = Role.SECONDARY
+            self._reset_election_deadline()
 
     def _reset_election_deadline(self):
         self.election_deadline = (self.clock.now() + self.election_timeout
