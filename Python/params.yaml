@@ -1,6 +1,7 @@
 # A secondary waits election_timeout + exp(election_timeout) to become candidate after it fails
 # to replicate from a primary.
 leases_enabled: true
+read_lease_optimization_enabled: true
 lease_timeout: 10000000
 max_clock_error: 0.1  # Max ratio of error to timespan, e.g. 10% error is 0.1.
 election_timeout: 10000000

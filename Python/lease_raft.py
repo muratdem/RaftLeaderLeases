@@ -206,6 +206,10 @@ class Node:
         get_event_loop().create_task("heartbeat", self.heartbeat())
 
     async def noop_writer(self):
+        """Write a periodic noop.
+
+        Not relevant for any perf tests, but MongoDB does do this.
+        """
         try:
             while True:
                 await sleep(self.noop_rate)
@@ -463,7 +467,9 @@ class Node:
             # My newest committed entry is before lease timeout, same for older entries.
             return False
 
-        if for_writes:
+        # "Read lease optimization" means this primary can serve reads before it gets a
+        # lease, while a prior primary's lease is valid.
+        if for_writes or not self.read_lease_optimization_enabled:
             if committed[-1].term != self.current_term:
                 # I haven't committed an entry yet. This check fixes SERVER-53813.
                 return False
@@ -531,7 +537,9 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        if self.leases_enabled and not self.has_lease(for_writes=False):
+        if (concern is ReadConcern.LINEARIZABLE
+            and self.leases_enabled
+            and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
 
         # MAJORITY and LINEARIZABLE read at the majority-commit index.
