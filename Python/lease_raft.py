@@ -206,9 +206,10 @@ class Node:
         get_event_loop().create_task("heartbeat", self.heartbeat())
 
     async def noop_writer(self):
-        """Write a periodic noop.
+        """Write a periodic noop. Ensures lease extension for readonly workloads.
 
-        Not relevant for any perf tests, but MongoDB does do this.
+        The paper mentions an optimization for readonly workloads: only write a noop
+        when a query arrives at a leaseless leader.
         """
         try:
             while True:
