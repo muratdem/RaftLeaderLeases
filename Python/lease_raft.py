@@ -48,7 +48,7 @@ class Write:
 
 @dataclass
 class ReadReply:
-    absolute_ts: Timestamp
+    execution_ts: Timestamp
     """Absolute time the read occurred."""
     value: list[int]
 
@@ -552,7 +552,7 @@ class Node:
             self._write_internal(key=_NOOP, value=_NOOP)
             await self._await_commit_index(index=len(self.log) - 1)
 
-        return ReadReply(absolute_ts=get_current_ts(),
+        return ReadReply(execution_ts=get_current_ts(),
                          value=[e.value for e in log if e.key == key])
 
     def _maybe_stepdown(self, term: int) -> bool:

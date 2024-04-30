@@ -93,8 +93,8 @@ async def partition_nemesis(network: Network,
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     """Throw exception if "client_log" is not linearizable."""
     # We're omniscient, we know the absolute time each event occurred, so we don't need
-    # a costly checking algorithm. Just sort by the absolute times.
-    sorted_log = sorted(client_log, key=lambda e: e.absolute_ts)
+    # a costly checking algorithm. Just sort by the execution times.
+    sorted_log = sorted(client_log, key=lambda e: e.execution_ts)
     _logger.info("Checking linearizability. Log:")
     for entry in sorted_log:
         _logger.info(entry)
@@ -110,10 +110,10 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
             return log  # Empty history is already linearized.
 
         # If there are simultaneous events, try ordering any linearization of them.
-        first_entries = [e for e in log if e.absolute_ts == log[0].absolute_ts]
+        first_entries = [e for e in log if e.execution_ts == log[0].execution_ts]
         for i, entry in enumerate(first_entries):
-            assert entry.start_ts <= entry.absolute_ts
-            assert entry.absolute_ts <= entry.end_ts
+            assert entry.start_ts <= entry.execution_ts
+            assert entry.execution_ts <= entry.end_ts
 
             # Try linearizing "entry" at history's start. No other entry's end can
             # precede this entry's start.

@@ -17,7 +17,7 @@ class ClientLogEntry:
     op_type: OpType
     start_ts: Timestamp
     """The absolute time when the client sent the request."""
-    absolute_ts: Timestamp
+    execution_ts: Timestamp
     """The absolute time when the event occurred. (We're omniscient, we know this.)"""
     end_ts: Timestamp
     """The absolute time when the client received reply."""
@@ -48,7 +48,7 @@ async def client_read(node: Node, key: int) -> ClientLogEntry:
         reply = await node.read(key=key, concern=ReadConcern.LINEARIZABLE)
         return ClientLogEntry(op_type=ClientLogEntry.OpType.Read,
                               start_ts=start_ts,
-                              absolute_ts=reply.absolute_ts,
+                              execution_ts=reply.execution_ts,
                               end_ts=get_current_ts(),
                               key=key,
                               value=reply.value,
@@ -56,7 +56,7 @@ async def client_read(node: Node, key: int) -> ClientLogEntry:
     except Exception as e:
         return ClientLogEntry(op_type=ClientLogEntry.OpType.Read,
                               start_ts=start_ts,
-                              absolute_ts=get_current_ts(),
+                              execution_ts=get_current_ts(),
                               end_ts=get_current_ts(),
                               key=key,
                               success=False,
@@ -66,10 +66,10 @@ async def client_read(node: Node, key: int) -> ClientLogEntry:
 async def client_write(node: Node, key: int, value: int) -> ClientLogEntry:
     start_ts = get_current_ts()
     try:
-        absolute_ts = await node.write(key=key, value=value)
+        execution_ts = await node.write(key=key, value=value)
         return ClientLogEntry(op_type=ClientLogEntry.OpType.ListAppend,
                               start_ts=start_ts,
-                              absolute_ts=absolute_ts,
+                              execution_ts=execution_ts,
                               end_ts=get_current_ts(),
                               key=key,
                               value=value,
@@ -77,7 +77,7 @@ async def client_write(node: Node, key: int, value: int) -> ClientLogEntry:
     except Exception as e:
         return ClientLogEntry(op_type=ClientLogEntry.OpType.ListAppend,
                               start_ts=start_ts,
-                              absolute_ts=get_current_ts(),
+                              execution_ts=get_current_ts(),
                               end_ts=get_current_ts(),
                               key=key,
                               value=value,

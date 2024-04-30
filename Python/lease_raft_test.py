@@ -215,7 +215,7 @@ class LinearizabilityTest(unittest.TestCase):
                 ClientLogEntry(
                     op_type=ClientLogEntry.OpType.ListAppend,
                     start_ts=1,
-                    absolute_ts=2,
+                    execution_ts=2,
                     end_ts=3,
                     key=1,
                     value=1,
@@ -224,7 +224,7 @@ class LinearizabilityTest(unittest.TestCase):
                 ClientLogEntry(
                     op_type=ClientLogEntry.OpType.ListAppend,
                     start_ts=4,
-                    absolute_ts=5,
+                    execution_ts=5,
                     end_ts=6,
                     key=2,
                     value=1,
@@ -233,7 +233,7 @@ class LinearizabilityTest(unittest.TestCase):
                 ClientLogEntry(
                     op_type=ClientLogEntry.OpType.Read,
                     start_ts=6,
-                    absolute_ts=7,
+                    execution_ts=7,
                     end_ts=8,
                     key=1,
                     value=[2, 1],  # Wrong, should be [1, 2].
@@ -244,7 +244,7 @@ class LinearizabilityTest(unittest.TestCase):
         event_1 = ClientLogEntry(
             op_type=ClientLogEntry.OpType.ListAppend,
             start_ts=1,
-            absolute_ts=2,
+            execution_ts=2,
             end_ts=2,
             key=1,
             value=1,
@@ -253,7 +253,7 @@ class LinearizabilityTest(unittest.TestCase):
         event_2 = ClientLogEntry(
             op_type=ClientLogEntry.OpType.ListAppend,
             start_ts=1,
-            absolute_ts=2,  # Same time as event_1.
+            execution_ts=2,  # Same time as event_1.
             end_ts=2,
             key=1,
             value=2,
@@ -262,7 +262,7 @@ class LinearizabilityTest(unittest.TestCase):
         read_event = ClientLogEntry(
             op_type=ClientLogEntry.OpType.Read,
             start_ts=3,
-            absolute_ts=4,
+            execution_ts=4,
             end_ts=4,
             key=1,
             value=[1, 2],  # The value if event_1 happened first.

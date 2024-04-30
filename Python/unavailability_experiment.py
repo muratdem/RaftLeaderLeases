@@ -117,7 +117,7 @@ def main():
         stats = [{
             "leases_enabled": leases_enabled,
             "read_lease_optimization_enabled": read_lease_optimization_enabled,
-            "absolute_ts": entry.absolute_ts,
+            "execution_ts": entry.execution_ts,
             "writes": 1 if entry.op_type is ClientLogEntry.OpType.ListAppend else 0,
             "reads": 1 if entry.op_type is ClientLogEntry.OpType.Read else 0,
         } for entry in log]
