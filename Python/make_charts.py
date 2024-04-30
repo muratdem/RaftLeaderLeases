@@ -5,7 +5,7 @@ import pandas as pd
 
 _logger = logging.getLogger("chart")
 
-BARWIDTH = 30
+BARWIDTH = 10
 LINEWIDTH = 2
 
 
@@ -55,10 +55,13 @@ def chart_unavailability():
     df_csv = pd.read_csv("metrics/unavailability_experiment.csv")
 
     def resample_data(df_micros):
-        # Convert absolute_ts from microseconds to seconds.
-        df_micros["seconds"] = pd.to_datetime(df_micros["absolute_ts"], unit="us")
-        # Resample to calculate sums per second.
-        resampled = df_micros.resample("s", on="seconds").sum()
+        # Maybe I'm debugging unavailability_experiment.py didn't generate all the data.
+        if len(df_micros) == 0:
+            _logger.warning("No data")
+            return df_micros
+
+        df_micros["timestamp"] = pd.to_datetime(df_micros["execution_ts"], unit="us")
+        resampled = df_micros.resample("10ms", on="timestamp").sum()
         return resampled[["reads", "writes"]]
 
     df_no_lease = resample_data(
@@ -71,25 +74,30 @@ def chart_unavailability():
 
     columns = ["reads", "writes"]
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, sharey=True)
+    dfs_and_axes = [(df_no_lease, ax1), (df_unoptimized, ax2), (df_optimized, ax3)]
+
+    maxes = {c: max(df[c].max() for df, ax in dfs_and_axes) for c in columns}
+    ax1.set_ylim(0, 1.3 * maxes["reads"])  # Affects all three axes because of "sharey".
     ax1.set(title="Throughput without leases",
             ylabel="Ops/sec")
     ax2.set(title="Throughput without read lease optimization",
             ylabel="Ops/sec")
     ax3.set(title="Throughput with read lease optimization",
             ylabel="Ops/sec",
-            xlabel="Seconds")
+            xlabel="Milliseconds")
 
-    for df, ax in [(df_no_lease, ax1),
-                   (df_unoptimized, ax2),
-                   (df_optimized, ax3)]:
+    for df, ax in dfs_and_axes:
         # Remove borders
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        for i, column in enumerate(columns):
-            ax.plot(df.index.second, df[column], label=column)
+        if len(df) == 0:
+            continue
 
-    ax1.legend(loc="center", framealpha=1, fancybox=False)
+        for i, column in enumerate(columns):
+            ax.plot((df.index - df.index.min()).total_seconds() * 1000, df[column], label=column)
+
+    ax2.legend(loc="center", framealpha=1, fancybox=False)
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4)
     chart_path = "metrics/unavailability_experiment.pdf"

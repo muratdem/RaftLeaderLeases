@@ -4,7 +4,8 @@ import os.path
 import time
 
 from client import ClientLogEntry
-from experiment import all_param_combos, BASE_PARAMS
+from experiment import all_param_combos
+from params import BASE_PARAMS
 from run_raft_with_params import main_coro
 from simulate import get_event_loop
 
@@ -36,7 +37,7 @@ def main():
     csv_file = open(csv_path, "w+")
     raw_params = BASE_PARAMS.copy()
     raw_params.update({
-        "one_way_latency_mean": list(range(100, 1001, 200)),
+        "one_way_latency_mean": list(range(50, 501, 50)),
         "leases_enabled": [False, True],
     })
 

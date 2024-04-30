@@ -5,7 +5,7 @@ import os.path
 from omegaconf import DictConfig
 
 from client import ClientLogEntry
-from experiment import BASE_PARAMS
+from params import BASE_PARAMS
 from lease_raft import Network, Node, Role, setup_logging
 from prob import PRNG
 from run_raft_with_params import reader, writer
@@ -63,7 +63,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
 
     async def stepdown_nemesis():
         """After a while, step down the primary and elect another node."""
-        await sleep(5 * 1000 * 1000)
+        await sleep(params.lease_timeout)
         primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
         assert len(primaries) == 1
         primary = primaries[0]
@@ -87,15 +87,16 @@ def main():
     csv_path = f"metrics/{os.path.splitext(os.path.basename(__file__))[0]}.csv"
     csv_file = open(csv_path, "w+")
     raw_params = BASE_PARAMS.copy()
-    NUM_OPERATIONS = 5000
+    NUM_OPERATIONS = 10 * 1000
+    # Long lease to explore read-lease optimization.
+    LEASE_TIMEOUT = 2 * BASE_PARAMS.election_timeout
     raw_params.update({
-        "election_timeout": 10 * 1000 * 1000,  # 10 seconds.
-        "heartbeat_rate": 400 * 1000,  # 0.4 seconds.
-        "lease_timeout": 20 * 1000 * 1000,  # 20 seconds.
+        "lease_timeout": LEASE_TIMEOUT,
         "operations": NUM_OPERATIONS,
         # Ensure operations continue before, during, after lease interregnum.
-        "interarrival": (raw_params.lease_timeout * 3) // NUM_OPERATIONS,
-        "keyspace_size": 1000,
+        "interarrival": (LEASE_TIMEOUT * 3) // NUM_OPERATIONS,
+        # No effect on performance stats, but keeps lists from growing too long.
+        "keyspace_size": NUM_OPERATIONS,
     })
 
     _logger.info(f"Parameters: {raw_params}")

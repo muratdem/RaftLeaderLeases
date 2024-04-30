@@ -167,7 +167,7 @@ class _NodeClock:
 
 
 _NOOP = -1
-_BUSY_WAIT = 50
+_BUSY_WAIT = 10
 
 
 class Node:

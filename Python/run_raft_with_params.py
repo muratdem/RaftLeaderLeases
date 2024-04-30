@@ -3,11 +3,11 @@ import logging
 import time
 from collections import defaultdict
 
-import yaml
 from omegaconf import DictConfig
 
 from client import ClientLogEntry, client_read, client_write
 from lease_raft import Network, Node, Role, setup_logging
+from params import BASE_PARAMS
 from prob import PRNG
 from simulate import Timestamp, get_current_ts, get_event_loop, sleep
 
@@ -263,12 +263,11 @@ async def main_coro(params: DictConfig, jumpstart_election=False) -> dict:
 
 
 def main():
-    logging.basicConfig(level=logging.DEBUG)
-    params = DictConfig(yaml.safe_load(open("params.yaml")))
+    logging.basicConfig(level=logging.INFO)
     event_loop = get_event_loop()
     metrics = event_loop.run_until_complete(event_loop.create_task("main", main_coro(
-        params=params,
-        jumpstart_election=params.get("jumpstart_election"))))
+        params=BASE_PARAMS,
+        jumpstart_election=BASE_PARAMS.get("jumpstart_election"))))
     _logger.info(f"metrics: {metrics}")
 
 
