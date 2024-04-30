@@ -112,6 +112,9 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
         # If there are simultaneous events, try ordering any linearization of them.
         first_entries = [e for e in log if e.absolute_ts == log[0].absolute_ts]
         for i, entry in enumerate(first_entries):
+            assert entry.start_ts <= entry.absolute_ts
+            assert entry.absolute_ts <= entry.end_ts
+
             # Try linearizing "entry" at history's start. No other entry's end can
             # precede this entry's start.
             log_prime = log.copy()
