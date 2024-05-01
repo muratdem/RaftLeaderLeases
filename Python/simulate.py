@@ -8,7 +8,8 @@ FutureCallback = Callable[[Any, Exception | None], None]
 
 
 class Future:
-    def __init__(self):
+    def __init__(self, loop: "EventLoop"):
+        self.loop = loop
         self.callbacks: list[FutureCallback] = []
         self.resolved = False
         self.result = None
@@ -17,7 +18,7 @@ class Future:
     def add_done_callback(self, callback: FutureCallback) -> None:
         assert not inspect.iscoroutinefunction(callback), "Use create_task()"
         if self.resolved:
-            callback(self.result, self.exception)
+            self.loop.call_soon(callback, self.result, self.exception)
         else:
             self.callbacks.append(callback)
 
@@ -59,8 +60,8 @@ class _Task(Future):
         cls._instances.add(instance)
         return instance
 
-    def __init__(self, name: str, coro: Coroutine):
-        super().__init__()
+    def __init__(self, loop: "EventLoop", name: str, coro: Coroutine):
+        super().__init__(loop)
         self.name = name
         self.coro = coro
         self.step(None, None)
@@ -96,7 +97,7 @@ class _Task(Future):
 
 def sleep(delay: int) -> Future:
     assert delay >= 0
-    f = Future()
+    f = Future(loop=_global_loop)
     _global_loop.call_later(delay=delay, callback=f.resolve)
     return f
 
@@ -160,7 +161,7 @@ class EventLoop:
         Returns a Future that will be resolved after the callback runs.
         """
         assert not inspect.iscoroutinefunction(callback), "Use create_task()"
-        f = Future()
+        f = Future(loop=self)
 
         def alarm_callback():
             callback(*args, **kwargs)
@@ -177,7 +178,7 @@ class EventLoop:
 
         Returns a Future that will be resolved after the coroutine finishes.
         """
-        return _Task(name=name, coro=coro)
+        return _Task(loop=self, name=name, coro=coro)
 
     @property
     def current_ts(self) -> int:
