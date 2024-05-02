@@ -65,6 +65,8 @@ class LeaseRaftTest(SimulatorTestCase):
             "heal_rate": 1000,
             "keyspace_size": 1,
             "leases_enabled": False,
+            "read_lease_optimization_enabled": True,
+            "log_write_micros": None,
             "lease_timeout": 1000,
             "seed": 1,
         })
@@ -124,9 +126,9 @@ class LeaseRaftTest(SimulatorTestCase):
                                            expected_result=[],
                                            leases_enabled=False)
 
-    async def test_read_concern_local_upholds_read_your_writes(self):
+    async def test_read_concern_linearizable_upholds_read_your_writes(self):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
-            await self.read_from_stale_primary(concern=ReadConcern.LOCAL,
+            await self.read_from_stale_primary(concern=ReadConcern.LINEARIZABLE,
                                                expected_result=[1],
                                                leases_enabled=True)
 
