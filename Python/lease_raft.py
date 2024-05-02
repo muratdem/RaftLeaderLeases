@@ -546,7 +546,7 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        if (concern is ReadConcern.LINEARIZABLE
+        if (concern is not ReadConcern.LOCAL
             and self.leases_enabled
             and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
