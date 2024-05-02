@@ -22,6 +22,7 @@ BASE_PARAMS = DictConfig({
     "leases_enabled": True,
     "read_lease_optimization_enabled": True,
     "lease_timeout": 500 * 1000,  # Half a second.
+    "log_write_micros": None,  # Optional, min microseconds between oplog writes.
     "check_linearizability": True,  # Whether to check if the history was linearizable.
     "metrics_start_ts": 1 * 1000 * 1000,
     "jumpstart_election": True,  # Don't wait for timeout at simulation start.

@@ -1,3 +1,4 @@
+import argparse
 import csv
 import logging
 import os.path
@@ -42,10 +43,11 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
     # Schedule operations at regular intervals. 66% reads, 33% writes.
     for i in range(int(params.operations)):
         start_ts += params.interarrival
+        jitter = prng.randint(-params.interarrival // 2, params.interarrival // 2)
         if i % 3 == 0:
             tasks.append(lp.create_task(name=f"writer {i}", coro=writer(
                 client_id=i,
-                start_ts=start_ts,
+                start_ts=start_ts + jitter,
                 nodes=list(nodes.values()),
                 client_log=client_log,
                 prng=prng,
@@ -53,7 +55,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
         else:
             tasks.append(lp.create_task(name=f"reader {i + 1}", coro=reader(
                 client_id=i + 1,
-                start_ts=start_ts,
+                start_ts=start_ts + jitter,
                 nodes=list(nodes.values()),
                 client_log=client_log,
                 prng=prng,
@@ -80,7 +82,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
     return client_log
 
 
-def main():
+def main(log_write_speed_ratio: float):
     logging.basicConfig(level=logging.INFO)
     event_loop = get_event_loop()
     csv_writer: None | csv.DictWriter = None
@@ -90,11 +92,16 @@ def main():
     NUM_OPERATIONS = 10 * 1000
     # Long lease to explore read-lease optimization.
     LEASE_TIMEOUT = 2 * BASE_PARAMS.election_timeout
+    # Ensure operations continue before, during, after lease interregnum.
+    INTERARRIVAL = (LEASE_TIMEOUT * 3) // NUM_OPERATIONS
     raw_params.update({
         "lease_timeout": LEASE_TIMEOUT,
         "operations": NUM_OPERATIONS,
         # Ensure operations continue before, during, after lease interregnum.
         "interarrival": (LEASE_TIMEOUT * 3) // NUM_OPERATIONS,
+        "interrival": INTERARRIVAL,
+        # Slow replication so new leader must catch up gradually.
+        "log_write_micros": int(log_write_speed_ratio * INTERARRIVAL),
         # No effect on performance stats, but keeps lists from growing too long.
         "keyspace_size": NUM_OPERATIONS,
     })
@@ -134,4 +141,10 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--log-write-speed-ratio", type=float, default=0.7,
+        help="How much faster is replication than write arrivals? Smaller is faster.")
+
+    args = parser.parse_args()
+    main(args.log_write_speed_ratio)

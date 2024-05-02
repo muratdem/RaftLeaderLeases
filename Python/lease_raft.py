@@ -196,6 +196,7 @@ class Node:
         self.noop_rate: int = cfg.noop_rate
         self.election_timeout: int = cfg.election_timeout
         self.heartbeat_rate: int = cfg.heartbeat_rate
+        self.log_write_micros: int = cfg.log_write_micros
         self.metrics = Metrics(metrics_start_ts=cfg.get("metrics_start_ts", 0))
 
     def initiate(self, nodes: dict[int, "Node"]):
@@ -279,6 +280,9 @@ class Node:
                     await sleep(_BUSY_WAIT)
                     continue
 
+                _logger.debug(
+                    f"{self} replicating {len(sync_source.log) - len(self.log)} entries"
+                    f" from {sync_source}")
                 entry = sync_source.log[len(self.log)]
                 # Simulate waiting for entry to arrive. It may have arrived already.
                 apply_time = entry.ts + self.prng.one_way_latency_value()
@@ -300,6 +304,9 @@ class Node:
                                   term=self.current_term,
                                   log_index=len(self.log) - 1)
                 self.metrics.update("replication_lag", lag)
+                if self.log_write_micros is not None:
+                    await sleep(self.log_write_micros)
+
         except Exception as e:
             _logger.exception(e)
             raise

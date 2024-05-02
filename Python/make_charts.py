@@ -76,8 +76,6 @@ def chart_unavailability():
     fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, sharey=True)
     dfs_and_axes = [(df_no_lease, ax1), (df_unoptimized, ax2), (df_optimized, ax3)]
 
-    maxes = {c: max(df[c].max() for df, ax in dfs_and_axes) for c in columns}
-    ax1.set_ylim(0, 1.3 * maxes["reads"])  # Affects all three axes because of "sharey".
     ax1.set(title="Throughput without leases",
             ylabel="Ops/sec")
     ax2.set(title="Throughput without read lease optimization",
@@ -95,7 +93,9 @@ def chart_unavailability():
             continue
 
         for i, column in enumerate(columns):
-            ax.plot((df.index - df.index.min()).total_seconds() * 1000, df[column], label=column)
+            ax.plot((df.index - df.index.min()).total_seconds() * 1000,
+                    df[column],
+                    label=column)
 
     ax2.legend(loc="center", framealpha=1, fancybox=False)
     fig.tight_layout()
