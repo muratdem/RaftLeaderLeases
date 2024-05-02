@@ -151,19 +151,20 @@ class _NodeClock:
     """One node's clock."""
 
     def __init__(self, cfg: DictConfig, prng: PRNG):
-        self.previous_true_ts = self.previous_ts = get_current_ts()
+        self.previous_true_ts: float = get_current_ts()
+        self.previous_ts: float = get_current_ts()
         self.max_clock_error: float = cfg.max_clock_error
         self.prng = prng
 
-    def now(self):
+    def now(self) -> int:
         now = get_current_ts()
         true_span = now - self.previous_true_ts
-        next_ts = self.prng.randint(
-            int(self.previous_ts + true_span * (1 - self.max_clock_error)),
-            int(self.previous_ts + true_span * (1 + self.max_clock_error)))
+        next_ts = self.prng.uniform(
+            self.previous_ts + true_span * (1 - self.max_clock_error),
+            self.previous_ts + true_span * (1 + self.max_clock_error))
         self.previous_ts = next_ts
         self.previous_true_ts = now
-        return next_ts
+        return int(next_ts)
 
 
 _NOOP = -1
