@@ -19,6 +19,9 @@ class PRNG:
         # NumPy's rand_int excludes the high value, make it inclusive.
         return self._random_state.randint(low_inclusive, high_inclusive + 1)
 
+    def uniform(self, low: float, high: float) -> float:
+        return self._random_state.uniform(low, high)
+
     def choice(self, choices: list):
         return self._random_state.choice(choices)
 
