@@ -180,7 +180,9 @@ class Node:
         self.network = network
         self.monitor = _Monitor()
         self.leases_enabled: bool = cfg.leases_enabled
-        self.read_lease_optimization_enabled = cfg.read_lease_optimization_enabled
+        self.read_lease_opt_enabled = cfg.read_lease_opt_enabled
+        self.speculative_write_opt_enabled = \
+            cfg.speculative_write_opt_enabled
         self.lease_timeout: int = cfg.lease_timeout
         # Raft state (Raft paper p. 4).
         self.current_term = 0
@@ -206,6 +208,9 @@ class Node:
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
         get_event_loop().create_task("heartbeat", self.heartbeat())
+        if self.leases_enabled and self.speculative_write_opt_enabled:
+            get_event_loop().create_task(
+                "commit index", self.commit_index_updater())
 
     async def noop_writer(self):
         """Write a periodic noop. Ensures lease extension for readonly workloads.
@@ -242,6 +247,7 @@ class Node:
                 return
 
     async def replicate(self):
+        """Eternal thread that replicates log entries."""
         try:
             self._reset_election_deadline()
             while True:
@@ -313,6 +319,7 @@ class Node:
             raise
 
     async def heartbeat(self):
+        """Send heartbeat requests to all peers."""
         try:
             while True:
                 for node in self.nodes.values():
@@ -337,7 +344,23 @@ class Node:
             _logger.exception(e)
             raise
 
+    async def commit_index_updater(self):
+        """Periodically check if we can advance the commit index.
+
+        With the speculative write optimization, a primary can write without a lease but
+        can't advance the commit point. Since the primary acquires a lease purely due to
+        time passing, we need an eternal task to check if we can advance commit index.
+        """
+        assert self.leases_enabled
+        assert self.speculative_write_opt_enabled
+        while True:
+            if self.has_lease(for_writes=True):
+                self._primary_update_commit_index()
+
+            await sleep(_BUSY_WAIT)
+
     def request_heartbeat(self, node_id: int, term: int, role: Role) -> None:
+        """I received a heartbeat request."""
         self.monitor.received_ping(
             node_id=node_id, role=role, term=term, ts=self.clock.now())
         node = self.nodes[node_id]
@@ -350,6 +373,7 @@ class Node:
                           role=self.role)
 
     def reply_to_heartbeat(self, node_id: int, term: int, role: Role) -> None:
+        """I received a heartbeat reply."""
         self.monitor.received_ping(
             node_id=node_id, role=role, term=term, ts=self.clock.now())
         node = self.nodes[node_id]
@@ -376,6 +400,7 @@ class Node:
 
     def request_vote(self, term: int, candidate_id: int, last_log_index: int,
                      last_log_term: int) -> None:
+        """I'm a voter, receiving a candidate's RequestVote message."""
         granted = True
         if term < self.current_term:
             granted = False
@@ -411,6 +436,7 @@ class Node:
                           vote_granted=granted)
 
     def receive_vote(self, voter_id: int, term: int, vote_granted: bool) -> None:
+        """I'm a candidate, receiving a yes or no vote."""
         logging.debug(f"{self} received {vote_granted} vote from {voter_id}")
         if term > self.current_term:
             self.current_term = term
@@ -427,6 +453,7 @@ class Node:
                 self._write_internal(_NOOP, _NOOP)
 
     def _update_commit_index(self, index: int) -> None:
+        """Primary advances index, or secondary receives primary's index."""
         self.commit_index = max(self.commit_index, index)
         # A secondary can learn of a commit index higher than it has replicated.
         start_i = min(len(self.log) - 1, self.commit_index)
@@ -439,6 +466,7 @@ class Node:
             self.log[i].committed_at_absolute_ts = get_current_ts()
 
     def update_secondary_position(self, node_id: int, term: int, log_index: int):
+        """I'm a primary, receiving a secondary's replication position."""
         self.monitor.received_ping(node_id=node_id,
                                    role=Role.SECONDARY,
                                    term=term,
@@ -449,36 +477,59 @@ class Node:
             return
 
         self.match_index[node_id] = log_index
+        if (self.leases_enabled
+            and self.speculative_write_opt_enabled
+            and not self.has_lease(for_writes=True)):
+            _logger.info(f"{self} pinning commit index until I have a lease")
+            return
+
+        self._primary_update_commit_index()
+
+    def _primary_update_commit_index(self) -> None:
+        """I'm a primary, updating commit index from secondaries' known positions."""
+        assert self.role is Role.PRIMARY
+        old_commit_index = self.commit_index
         self._update_commit_index(statistics.median(self.match_index.values()))
-        for n in self.nodes.values():
-            if n is not self:
-                self.network.send(self.node_id,
-                                  n.update_commit_index,
-                                  node_id=self.node_id,
-                                  term=self.current_term,
-                                  index=self.commit_index)
+        if self.commit_index != old_commit_index:
+            for n in self.nodes.values():
+                if n is not self:
+                    self.network.send(self.node_id,
+                                      n.update_commit_index,
+                                      node_id=self.node_id,
+                                      term=self.current_term,
+                                      index=self.commit_index)
 
     def update_commit_index(self, node_id: int, term: int, index: int):
+        """I'm a secondary. The primary tells me its commit index."""
         self.monitor.received_ping(
             node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now())
-        if self._maybe_stepdown(term):
+        if self.role is not Role.SECONDARY:
+            # I was elected while this message was in flight.
             return
         self._update_commit_index(index)
 
     def has_lease(self, for_writes: bool) -> bool:
-        if self.role is not Role.PRIMARY or len(self.log) == 0 or self.commit_index < 0:
+        """Decide if I can read or write."""
+        # With speculative_write_opt_enabled, I can't advance the commit index without
+        # a lease. But I have to advance the commit index to get a lease! So, locally
+        # calculate the commit index from nodes' known positions. If I've heard of a
+        # higher commit index while I was a secondary, then use that instead.
+        commit_index_tmp = max(
+            self.commit_index, statistics.median(self.match_index.values()))
+
+        if self.role is not Role.PRIMARY or len(self.log) == 0 or commit_index_tmp < 0:
             return False
 
         lease_timeout_with_slop = self.lease_timeout * (1 + self.clock.max_clock_error)
         lease_start = self.clock.now() - lease_timeout_with_slop
-        committed = self.log[:self.commit_index + 1]
+        committed = self.log[:commit_index_tmp + 1]
         if committed[-1].local_ts <= lease_start:
             # My newest committed entry is before lease timeout, same for older entries.
             return False
 
         # "Read lease optimization" means this primary can serve reads before it gets a
         # lease, while a prior primary's lease is valid.
-        if for_writes or not self.read_lease_optimization_enabled:
+        if for_writes or not self.read_lease_opt_enabled:
             if committed[-1].term != self.current_term:
                 # I haven't committed an entry yet. This check fixes SERVER-53813.
                 return False
@@ -520,7 +571,9 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        while self.leases_enabled and not self.has_lease(for_writes=True):
+        while (self.leases_enabled
+               and not self.speculative_write_opt_enabled
+               and not self.has_lease(for_writes=True)):
             await sleep(_BUSY_WAIT)
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for lease")

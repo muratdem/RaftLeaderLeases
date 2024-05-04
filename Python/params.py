@@ -20,7 +20,8 @@ BASE_PARAMS = DictConfig({
     "heal_rate": None,  # Mean time to heal a partition, exponentially distributed.
     "keyspace_size": 5,  # Number of keys. Reads/writes choose keys at random.
     "leases_enabled": True,
-    "read_lease_optimization_enabled": True,
+    "read_lease_opt_enabled": True,
+    "speculative_write_opt_enabled": True,
     "lease_timeout": 500 * 1000,  # Half a second.
     "log_write_micros": None,  # Optional, min microseconds between oplog writes.
     "check_linearizability": True,  # Whether to check if the history was linearizable.

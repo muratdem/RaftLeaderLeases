@@ -65,7 +65,8 @@ class LeaseRaftTest(SimulatorTestCase):
             "heal_rate": 1000,
             "keyspace_size": 1,
             "leases_enabled": False,
-            "read_lease_optimization_enabled": True,
+            "read_lease_opt_enabled": True,
+            "speculative_write_opt_enabled": True,
             "log_write_micros": None,
             "lease_timeout": 1000,
             "seed": 1,
@@ -138,8 +139,11 @@ class LeaseRaftTest(SimulatorTestCase):
                                                expected_result=[1],
                                                leases_enabled=True)
 
-    async def test_await_lease(self):
-        await self.replica_set_setup(leases_enabled=True, noop_rate=1e10)
+    async def await_lease(self, speculative_write_opt_enabled: bool):
+        await self.replica_set_setup(
+            leases_enabled=True,
+            speculative_write_opt_enabled=speculative_write_opt_enabled,
+            noop_rate=1e10)
         primary = await self.get_primary()
         self.assertFalse(primary.has_lease(for_writes=True))
         self.assertFalse(primary.has_lease(for_writes=False))
@@ -149,6 +153,12 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertTrue(primary.has_lease(for_writes=False))
         reply = await primary.read(1, concern=ReadConcern.MAJORITY)
         self.assertEqual([1], reply.value)
+
+    async def test_await_lease_with_speculative_write(self):
+        await self.await_lease(speculative_write_opt_enabled=True)
+
+    async def test_await_lease_without_speculative_write(self):
+        await self.await_lease(speculative_write_opt_enabled=False)
 
     async def test_read_with_prior_leader_lease(self):
         # Lease timeout > election timeout, so we have a stale leaseholder.

@@ -52,9 +52,21 @@ def chart_network_latency():
 
 
 def chart_unavailability():
-    df_csv = pd.read_csv("metrics/unavailability_experiment.csv")
+    from unavailability_experiment import SUB_EXPERIMENT_PARAMS
 
-    def resample_data(df_micros):
+    csv = pd.read_csv("metrics/unavailability_experiment.csv")
+    fig, axes = plt.subplots(len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True)
+
+    def resample_data(leases_enabled,
+                      read_lease_opt_enabled,
+                      speculative_write_opt_enabled,
+                      **_):
+        df_micros = csv[
+            (csv["leases_enabled"] == leases_enabled)
+            & (csv["read_lease_opt_enabled"] == read_lease_opt_enabled)
+            & (csv["speculative_write_opt_enabled"] == speculative_write_opt_enabled)
+            ].copy()
+
         # Maybe I'm debugging unavailability_experiment.py didn't generate all the data.
         if len(df_micros) == 0:
             _logger.warning("No data")
@@ -62,29 +74,18 @@ def chart_unavailability():
 
         df_micros["timestamp"] = pd.to_datetime(df_micros["execution_ts"], unit="us")
         resampled = df_micros.resample("10ms", on="timestamp").sum()
-        return resampled[["reads", "writes"]]
+        # Remove first and last rows, which have low throughput due to artifacts.
+        return resampled[["reads", "writes"]].iloc[1:-1]
 
-    df_no_lease = resample_data(
-        df_csv[df_csv["leases_enabled"] == False].copy())
-    df_unoptimized = resample_data(
-        df_csv[(df_csv["leases_enabled"] == True)
-               & (df_csv["read_lease_optimization_enabled"] == False)].copy())
-    df_optimized = resample_data(
-        df_csv[df_csv["read_lease_optimization_enabled"] == True].copy())
+    dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
+    # Use max read throughput as y limit. Max write throughput could be very high.
+    y_lim = 2 * max(df["reads"].max() for df in dfs)
+    axes[-1].set(xlabel="Milliseconds")
 
-    columns = ["reads", "writes"]
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, sharey=True)
-    dfs_and_axes = [(df_no_lease, ax1), (df_unoptimized, ax2), (df_optimized, ax3)]
-
-    ax1.set(title="Throughput without leases",
-            ylabel="Ops/sec")
-    ax2.set(title="Throughput without read lease optimization",
-            ylabel="Ops/sec")
-    ax3.set(title="Throughput with read lease optimization",
-            ylabel="Ops/sec",
-            xlabel="Milliseconds")
-
-    for df, ax in dfs_and_axes:
+    for i, df in enumerate(dfs):
+        ax = axes[i]
+        sub_exp_params = SUB_EXPERIMENT_PARAMS[i]
+        ax.set(title=sub_exp_params["title"])
         # Remove borders
         for spine in ax.spines.values():
             spine.set_visible(False)
@@ -92,12 +93,39 @@ def chart_unavailability():
         if len(df) == 0:
             continue
 
-        for i, column in enumerate(columns):
+        for column in ["reads", "writes"]:
             ax.plot((df.index - df.index.min()).total_seconds() * 1000,
                     df[column],
                     label=column)
+            ax.set_ylim(0, y_lim)
 
-    ax2.legend(loc="center", framealpha=1, fancybox=False)
+        # These parameters are in microseconds, the x axis is in milliseconds.
+        ax.axvline(
+            x=sub_exp_params.stepdown_time / 1000,
+            color="red")
+        ax.axvline(
+            x=(sub_exp_params.stepdown_time + sub_exp_params.election_timeout) / 1000,
+            color="green")
+        ax.axvline(
+            x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,
+            color="purple")
+
+    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time /1000,
+                 int(y_lim * 0.8),
+                 "leader crash →  ",
+                 color="red",
+                 horizontalalignment="right")
+    axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
+                 + SUB_EXPERIMENT_PARAMS[0].election_timeout) / 1000 + 45,
+                 int(y_lim * 0.8),
+                 "← new leader elected",
+                 color="green",
+                 bbox=dict(facecolor="white", edgecolor="none"))
+    axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
+                 + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 + 45,
+                 int(y_lim * 0.5),
+                 "← old lease expires", color="purple")
+    axes[1].legend(loc="center", framealpha=1, fancybox=False)
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4)
     chart_path = "metrics/unavailability_experiment.pdf"
