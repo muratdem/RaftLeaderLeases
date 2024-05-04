@@ -202,7 +202,7 @@ class Node:
 
     def initiate(self, nodes: dict[int, "Node"]):
         self.nodes = nodes.copy()
-        self.match_index = {n.node_id: 0 for n in nodes.values()}
+        self.match_index = {n.node_id: -1 for n in nodes.values()}
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
         get_event_loop().create_task("heartbeat", self.heartbeat())
