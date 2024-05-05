@@ -38,7 +38,7 @@ def main():
     raw_params = BASE_PARAMS.copy()
     raw_params.update({
         "one_way_latency_mean": list(range(50, 501, 50)),
-        "leases_enabled": [False, True],
+        "lease_enabled": [False, True],
     })
 
     for params in all_param_combos(raw_params):

@@ -14,12 +14,12 @@ from simulate import get_current_ts, get_event_loop, sleep
 _logger = logging.getLogger("experiment")
 
 NUM_OPERATIONS = 10 * 1000
-# Long lease to explore read-lease optimization.
+# Long lease to explore inherited read lease optimization.
 LEASE_TIMEOUT = 2 * BASE_PARAMS.election_timeout
 # Ensure operations continue before, during, after lease interregnum.
 INTERARRIVAL = (LEASE_TIMEOUT * 3) // NUM_OPERATIONS
 # Replication is only a little faster than client write throughput, so we can see the
-# effect of the speculative write optimization.
+# effect of the deferred commit optimization.
 LOG_WRITE_SPEED_RATIO = 0.7
 
 PARAMS = BASE_PARAMS.copy()
@@ -40,17 +40,17 @@ PARAMS.update({
 })
 
 SUB_EXPERIMENT_PARAMS = []
-for leases_enabled, read_lease_opt_enabled, speculative_write_opt_enabled, title in [
+for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
     (False, False, False, "Throughput without leases"),
-    (True, False, False, "Throughput without read lease optimization"),
-    (True, True, False, "Throughput with read lease optimization"),
-    (True, True, True, "Throughput with speculative writes"),
+    (True, False, False, "Throughput with leases, no inherited read lease"),
+    (True, True, False, "Throughput with inherited read lease"),
+    (True, True, True, "Throughput with deferred commit"),
 ]:
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
-        "leases_enabled": leases_enabled,
-        "read_lease_opt_enabled": read_lease_opt_enabled,
-        "speculative_write_opt_enabled": speculative_write_opt_enabled,
+        "lease_enabled": lease_enabled,
+        "inherit_lease_enabled": inherit_lease_enabled,
+        "defer_commit_enabled": defer_commit_enabled,
         "title": title,
     })
     SUB_EXPERIMENT_PARAMS.append(sub_exp_params)
@@ -137,10 +137,9 @@ def main():
             "main", experiment_coro(params=sub_exp_params)))
 
         stats = [{
-            "leases_enabled": sub_exp_params.leases_enabled,
-            "read_lease_opt_enabled": sub_exp_params.read_lease_opt_enabled,
-            "speculative_write_opt_enabled":
-                sub_exp_params.speculative_write_opt_enabled,
+            "lease_enabled": sub_exp_params.lease_enabled,
+            "inherit_lease_enabled": sub_exp_params.inherit_lease_enabled,
+            "defer_commit_enabled": sub_exp_params.defer_commit_enabled,
             "execution_ts": entry.execution_ts,
             "writes": 1 if entry.op_type is ClientLogEntry.OpType.ListAppend else 0,
             "reads": 1 if entry.op_type is ClientLogEntry.OpType.Read else 0,

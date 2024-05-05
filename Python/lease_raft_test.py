@@ -64,9 +64,9 @@ class LeaseRaftTest(SimulatorTestCase):
             "partition_rate": 500,
             "heal_rate": 1000,
             "keyspace_size": 1,
-            "leases_enabled": False,
-            "read_lease_opt_enabled": True,
-            "speculative_write_opt_enabled": True,
+            "lease_enabled": False,
+            "inherit_lease_enabled": True,
+            "defer_commit_enabled": True,
             "log_write_micros": None,
             "lease_timeout": 1000,
             "seed": 1,
@@ -93,10 +93,10 @@ class LeaseRaftTest(SimulatorTestCase):
             lambda: next((n for n in nodes if n.role == Role.PRIMARY), None))
 
     async def read_from_stale_primary(self,
-                                      leases_enabled: bool,
+                                      lease_enabled: bool,
                                       concern: ReadConcern,
                                       expected_result: list[int]) -> None:
-        await self.replica_set_setup(leases_enabled=leases_enabled)
+        await self.replica_set_setup(lease_enabled=lease_enabled)
         primary_A = await self.get_primary()
         # Make sure primary A has commit index > -1.
         await primary_A.write(key=0, value=0)
@@ -118,31 +118,31 @@ class LeaseRaftTest(SimulatorTestCase):
         # write.
         await self.read_from_stale_primary(concern=ReadConcern.LOCAL,
                                            expected_result=[],
-                                           leases_enabled=False)
+                                           lease_enabled=False)
 
     async def test_read_concern_majority_fails_linearizability(self):
         # Today, a client using w: "majority", rc: "majority" can fail to read its write
         # (hence fail linearizability) if it reads from a stale primary.
         await self.read_from_stale_primary(concern=ReadConcern.MAJORITY,
                                            expected_result=[],
-                                           leases_enabled=False)
+                                           lease_enabled=False)
 
     async def test_read_concern_linearizable_upholds_read_your_writes(self):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.LINEARIZABLE,
                                                expected_result=[1],
-                                               leases_enabled=True)
+                                               lease_enabled=True)
 
     async def test_read_concern_majority_upholds_linearizability(self):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.MAJORITY,
                                                expected_result=[1],
-                                               leases_enabled=True)
+                                               lease_enabled=True)
 
-    async def await_lease(self, speculative_write_opt_enabled: bool):
+    async def await_lease(self, defer_commit_enabled: bool):
         await self.replica_set_setup(
-            leases_enabled=True,
-            speculative_write_opt_enabled=speculative_write_opt_enabled,
+            lease_enabled=True,
+            defer_commit_enabled=defer_commit_enabled,
             noop_rate=1e10)
         primary = await self.get_primary()
         self.assertFalse(primary.has_lease(for_writes=True))
@@ -154,15 +154,15 @@ class LeaseRaftTest(SimulatorTestCase):
         reply = await primary.read(1, concern=ReadConcern.MAJORITY)
         self.assertEqual([1], reply.value)
 
-    async def test_await_lease_with_speculative_write(self):
-        await self.await_lease(speculative_write_opt_enabled=True)
+    async def test_await_lease_with_defer_commit(self):
+        await self.await_lease(defer_commit_enabled=True)
 
-    async def test_await_lease_without_speculative_write(self):
-        await self.await_lease(speculative_write_opt_enabled=False)
+    async def test_await_lease_without_defer_commit(self):
+        await self.await_lease(defer_commit_enabled=False)
 
     async def test_read_with_prior_leader_lease(self):
         # Lease timeout > election timeout, so we have a stale leaseholder.
-        await self.replica_set_setup(leases_enabled=True,
+        await self.replica_set_setup(lease_enabled=True,
                                      election_timeout=1000,
                                      lease_timeout=2000)
         primary_A = await self.get_primary()
@@ -197,7 +197,7 @@ class LeaseRaftTest(SimulatorTestCase):
 
     async def test_rollback(self):
         # Nothing to do with leases, just make sure rollback logic works.
-        await self.replica_set_setup(leases_enabled=False)
+        await self.replica_set_setup(lease_enabled=False)
         primary_A = await self.get_primary()
         await primary_A.write(key=1, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)

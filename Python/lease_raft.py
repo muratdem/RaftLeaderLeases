@@ -179,10 +179,10 @@ class Node:
         self.clock = _NodeClock(cfg, prng)
         self.network = network
         self.monitor = _Monitor()
-        self.leases_enabled: bool = cfg.leases_enabled
-        self.read_lease_opt_enabled = cfg.read_lease_opt_enabled
-        self.speculative_write_opt_enabled = \
-            cfg.speculative_write_opt_enabled
+        self.lease_enabled: bool = cfg.lease_enabled
+        self.inherit_lease_enabled = cfg.inherit_lease_enabled
+        self.defer_commit_enabled = \
+            cfg.defer_commit_enabled
         self.lease_timeout: int = cfg.lease_timeout
         # Raft state (Raft paper p. 4).
         self.current_term = 0
@@ -208,7 +208,7 @@ class Node:
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
         get_event_loop().create_task("heartbeat", self.heartbeat())
-        if self.leases_enabled and self.speculative_write_opt_enabled:
+        if self.lease_enabled and self.defer_commit_enabled:
             get_event_loop().create_task(
                 "commit index", self.commit_index_updater())
 
@@ -347,12 +347,12 @@ class Node:
     async def commit_index_updater(self):
         """Periodically check if we can advance the commit index.
 
-        With the speculative write optimization, a primary can write without a lease but
+        With the deferred commit optimization, a primary can write without a lease but
         can't advance the commit point. Since the primary acquires a lease purely due to
         time passing, we need an eternal task to check if we can advance commit index.
         """
-        assert self.leases_enabled
-        assert self.speculative_write_opt_enabled
+        assert self.lease_enabled
+        assert self.defer_commit_enabled
         while True:
             if self.has_lease(for_writes=True):
                 self._primary_update_commit_index()
@@ -477,8 +477,8 @@ class Node:
             return
 
         self.match_index[node_id] = log_index
-        if (self.leases_enabled
-            and self.speculative_write_opt_enabled
+        if (self.lease_enabled
+            and self.defer_commit_enabled
             and not self.has_lease(for_writes=True)):
             _logger.info(f"{self} pinning commit index until I have a lease")
             return
@@ -510,7 +510,7 @@ class Node:
 
     def has_lease(self, for_writes: bool) -> bool:
         """Decide if I can read or write."""
-        # With speculative_write_opt_enabled, I can't advance the commit index without
+        # With defer_commit_enabled, I can't advance the commit index without
         # a lease. But I have to advance the commit index to get a lease! So, locally
         # calculate the commit index from nodes' known positions. If I've heard of a
         # higher commit index while I was a secondary, then use that instead.
@@ -527,9 +527,9 @@ class Node:
             # My newest committed entry is before lease timeout, same for older entries.
             return False
 
-        # "Read lease optimization" means this primary can serve reads before it gets a
+        # "Inherited read lease" means this primary can serve reads before it gets a
         # lease, while a prior primary's lease is valid.
-        if for_writes or not self.read_lease_opt_enabled:
+        if for_writes or not self.inherit_lease_enabled:
             if committed[-1].term != self.current_term:
                 # I haven't committed an entry yet. This check fixes SERVER-53813.
                 return False
@@ -571,8 +571,8 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        while (self.leases_enabled
-               and not self.speculative_write_opt_enabled
+        while (self.lease_enabled
+               and not self.defer_commit_enabled
                and not self.has_lease(for_writes=True)):
             await sleep(_BUSY_WAIT)
             if self.role is not Role.PRIMARY:
@@ -600,7 +600,7 @@ class Node:
             raise Exception("Not primary")
 
         if (concern is not ReadConcern.LOCAL
-            and self.leases_enabled
+            and self.lease_enabled
             and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
 
@@ -608,7 +608,7 @@ class Node:
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])
 
-        if concern is ReadConcern.LINEARIZABLE and not self.leases_enabled:
+        if concern is ReadConcern.LINEARIZABLE and not self.lease_enabled:
             # Commit a noop.
             self._write_internal(key=_NOOP, value=_NOOP)
             await self._await_commit_index(index=len(self.log) - 1)

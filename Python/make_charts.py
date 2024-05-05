@@ -14,8 +14,8 @@ def chart_network_latency():
     columns = ["read_latency", "write_latency"]
     max_y = max([max(df[c]) for c in columns])
 
-    df_no_lease = df[df["leases_enabled"] == False]
-    df_lease = df[df["leases_enabled"] == True]
+    df_no_lease = df[df["lease_enabled"] == False]
+    df_lease = df[df["lease_enabled"] == True]
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True)
     ax1.set(title="Latency of linearizable writes and reads (no leases)",
             ylabel="microseconds")
@@ -57,14 +57,14 @@ def chart_unavailability():
     csv = pd.read_csv("metrics/unavailability_experiment.csv")
     fig, axes = plt.subplots(len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True)
 
-    def resample_data(leases_enabled,
-                      read_lease_opt_enabled,
-                      speculative_write_opt_enabled,
+    def resample_data(lease_enabled,
+                      inherit_lease_enabled,
+                      defer_commit_enabled,
                       **_):
         df_micros = csv[
-            (csv["leases_enabled"] == leases_enabled)
-            & (csv["read_lease_opt_enabled"] == read_lease_opt_enabled)
-            & (csv["speculative_write_opt_enabled"] == speculative_write_opt_enabled)
+            (csv["lease_enabled"] == lease_enabled)
+            & (csv["inherit_lease_enabled"] == inherit_lease_enabled)
+            & (csv["defer_commit_enabled"] == defer_commit_enabled)
             ].copy()
 
         # Maybe I'm debugging unavailability_experiment.py didn't generate all the data.
