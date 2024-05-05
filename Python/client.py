@@ -2,7 +2,7 @@ import enum
 import logging
 from dataclasses import dataclass
 
-from lease_raft import Node, ReadConcern
+from lease_guard import Node, ReadConcern
 from simulate import Timestamp, get_current_ts
 
 _logger = logging.getLogger("client")

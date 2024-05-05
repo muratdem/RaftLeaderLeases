@@ -6,7 +6,7 @@ from collections import defaultdict
 from omegaconf import DictConfig
 
 from client import ClientLogEntry, client_read, client_write
-from lease_raft import Network, Node, Role, setup_logging
+from lease_guard import Network, Node, Role, setup_logging
 from params import BASE_PARAMS
 from prob import PRNG
 from simulate import Timestamp, get_current_ts, get_event_loop, sleep

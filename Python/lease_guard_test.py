@@ -6,7 +6,7 @@ from unittest import TestCase
 from omegaconf import DictConfig
 
 from run_raft_with_params import ClientLogEntry, do_linearizability_check
-from lease_raft import Network, Node, ReadConcern, Role, setup_logging
+from lease_guard import Network, Node, ReadConcern, Role, setup_logging
 from prob import PRNG
 from simulate import get_event_loop, sleep
 
