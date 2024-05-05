@@ -94,7 +94,7 @@ def chart_unavailability():
             continue
 
         for column in ["reads", "writes"]:
-            ax.plot((df.index - df.index.min()).total_seconds() * 1000,
+            ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
                     df[column],
                     label=column)
             ax.set_ylim(0, y_lim)
