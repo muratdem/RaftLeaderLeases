@@ -2,6 +2,7 @@ import logging
 
 import matplotlib.pyplot as plt
 import pandas as pd
+from matplotlib.lines import Line2D
 
 _logger = logging.getLogger("chart")
 
@@ -102,13 +103,16 @@ def chart_unavailability():
         # These parameters are in microseconds, the x axis is in milliseconds.
         ax.axvline(
             x=sub_exp_params.stepdown_time / 1000,
-            color="red")
+            color="red",
+            linestyle="dotted")
         ax.axvline(
             x=(sub_exp_params.stepdown_time + sub_exp_params.election_timeout) / 1000,
-            color="green")
+            color="green",
+            linestyle="dotted")
         ax.axvline(
             x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,
-            color="purple")
+            color="purple",
+            linestyle="dotted")
 
     axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time /1000,
                  int(y_lim * 0.8),
@@ -125,8 +129,12 @@ def chart_unavailability():
                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 + 45,
                  int(y_lim * 0.5),
                  "← old lease expires", color="purple")
-    axes[1].legend(loc="center", framealpha=1, fancybox=False)
-    fig.tight_layout()
+    fig.legend(loc="upper center",
+               bbox_to_anchor=(0.5, 1.005),
+               ncol=2,
+               handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
+               labels=["reads", "writes"])
+    fig.text(0.04, 0.5, "Operations per millisecond", va="center", rotation="vertical")
     fig.subplots_adjust(hspace=0.4)
     chart_path = "metrics/unavailability_experiment.pdf"
     fig.savefig(chart_path)
