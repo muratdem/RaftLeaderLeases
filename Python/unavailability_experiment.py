@@ -25,6 +25,7 @@ LOG_WRITE_SPEED_RATIO = 0.7
 PARAMS = BASE_PARAMS.copy()
 PARAMS.update({
     "lease_timeout": LEASE_TIMEOUT,
+    "heartbeat_rate": LEASE_TIMEOUT // 2,
     "operations": NUM_OPERATIONS,
     # Ensure operations continue before, during, after lease interregnum.
     "interarrival": (LEASE_TIMEOUT * 3) // NUM_OPERATIONS,
@@ -84,8 +85,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
         primary.stepdown()
 
     lp = get_event_loop()
-    tasks = []
-    tasks.append(lp.create_task("stepdown", coro=stepdown_nemesis()))
+    tasks = [lp.create_task("stepdown", coro=stepdown_nemesis())]
 
     while not any(n.commit_index >= 0 for n in nodes.values()):
         await sleep(100)
