@@ -29,7 +29,6 @@ PARAMS.update({
     "operations": NUM_OPERATIONS,
     # Ensure operations continue before, during, after lease interregnum.
     "interarrival": (LEASE_TIMEOUT * 3) // NUM_OPERATIONS,
-    "interrival": INTERARRIVAL,
     # Slow replication so new leader must catch up gradually.
     "log_write_micros": int(LOG_WRITE_SPEED_RATIO * INTERARRIVAL),
     # No effect on performance stats, but keeps lists from growing too long.

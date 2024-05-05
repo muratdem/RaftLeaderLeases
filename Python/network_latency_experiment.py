@@ -4,7 +4,6 @@ import os.path
 import time
 
 from client import ClientLogEntry
-from experiment import all_param_combos
 from params import BASE_PARAMS
 from run_raft_with_params import main_coro
 from simulate import get_event_loop
@@ -36,25 +35,37 @@ def main():
     csv_path = f"metrics/{os.path.splitext(os.path.basename(__file__))[0]}.csv"
     csv_file = open(csv_path, "w+")
     raw_params = BASE_PARAMS.copy()
+    # Same params as unavailability_experiment.py.
     raw_params.update({
-        "one_way_latency_mean": list(range(50, 501, 50)),
-        "lease_enabled": [False, True],
+        "operations": 10 * 1000,
+        "keyspace_size": 10 * 1000,
+        "interarrival": 300,
+        "log_write_micros": 210,
+        "check_linearizability": False,  # For speed / avoid recursion limit error.
         "seed": 1,
     })
 
-    for params in all_param_combos(raw_params):
-        start = time.monotonic()
-        metrics = event_loop.run_until_complete(event_loop.create_task(
-            "main", main_coro(params=params, jumpstart_election=True)))
-        _logger.info(f"metrics: {metrics}")
-        stats = metrics | dict(params)
-        stats["real_duration"] = time.monotonic() - start
-        if csv_writer is None:
-            csv_writer = csv.DictWriter(csv_file, fieldnames=stats.keys())
-            csv_writer.writeheader()
+    for latency in range(50, 501, 50):
+        for lease_enabled in [True, False]:
+            params = raw_params.copy()
+            params.update({
+                "one_way_latency_mean": latency,
+                "one_way_latency_variance": 2 * latency,
+                "lease_enabled": lease_enabled,
+            })
 
-        csv_writer.writerow(stats)
-        event_loop.reset()
+            start = time.monotonic()
+            metrics = event_loop.run_until_complete(event_loop.create_task(
+                "main", main_coro(params=params, jumpstart_election=True)))
+            _logger.info(f"metrics: {metrics}")
+            stats = metrics | dict(params)
+            stats["real_duration"] = time.monotonic() - start
+            if csv_writer is None:
+                csv_writer = csv.DictWriter(csv_file, fieldnames=stats.keys())
+                csv_writer.writeheader()
+
+            csv_writer.writerow(stats)
+            event_loop.reset()
 
     csv_file.close()
     _logger.info(csv_path)
