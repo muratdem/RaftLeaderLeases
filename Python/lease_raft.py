@@ -181,8 +181,7 @@ class Node:
         self.monitor = _Monitor()
         self.lease_enabled: bool = cfg.lease_enabled
         self.inherit_lease_enabled = cfg.inherit_lease_enabled
-        self.defer_commit_enabled = \
-            cfg.defer_commit_enabled
+        self.defer_commit_enabled = cfg.defer_commit_enabled
         self.lease_timeout: int = cfg.lease_timeout
         # Raft state (Raft paper p. 4).
         self.current_term = 0
