@@ -36,10 +36,12 @@ class ClientLogEntry:
         if self.op_type is ClientLogEntry.OpType.ListAppend:
             return (f"{self.start_ts} -> {self.end_ts}:"
                     f" write key {self.key}={self.value}"
-                    f" ({'ok' if self.success else 'failed'})")
+                    f" {'ok' if self.success else 'failed'}"
+                    f" (ts={self.execution_ts})")
 
         return (f"{self.start_ts} -> {self.end_ts}:"
-                f" read key {self.key}={self.value}")
+                f" read key {self.key}={self.value}"
+                f" (ts={self.execution_ts})")
 
 
 async def client_read(node: Node, key: int) -> ClientLogEntry:

@@ -606,13 +606,15 @@ class Node:
         # MAJORITY and LINEARIZABLE read at the majority-commit index.
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])
+        execution_ts = get_current_ts()
 
         if concern is ReadConcern.LINEARIZABLE and not self.lease_enabled:
             # Commit a noop.
             self._write_internal(key=_NOOP, value=_NOOP)
-            await self._await_commit_index(index=len(self.log) - 1)
+            noop_index = len(self.log) - 1
+            await self._await_commit_index(index=noop_index)
 
-        return ReadReply(execution_ts=get_current_ts(),
+        return ReadReply(execution_ts=execution_ts,
                          value=[e.value for e in log if e.key == key])
 
     def _maybe_stepdown(self, term: int) -> bool:
