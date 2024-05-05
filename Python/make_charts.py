@@ -18,11 +18,9 @@ def chart_network_latency():
     df_no_lease = df[df["lease_enabled"] == False]
     df_lease = df[df["lease_enabled"] == True]
     fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True)
-    ax1.set(title="Latency of linearizable writes and reads (no leases)",
-            ylabel="microseconds")
+    ax1.set(title="Latency of linearizable writes and reads (no leases)")
     ax2.set(title="Latency of linearizable writes and reads (with leases)",
-            xlabel="one-way network latency (μs)",
-            ylabel="microseconds")
+            xlabel="one-way network latency (μs)")
 
     for df, ax in [(df_no_lease, ax1),
                    (df_lease, ax2)]:
@@ -44,9 +42,12 @@ def chart_network_latency():
             if is_zeros:
                 ax.bar_label(rects, padding=3)
 
-    ax1.legend(loc="center right", framealpha=1, fancybox=False)
-    ax2.legend(loc="center right", framealpha=1, fancybox=False)
-    plt.tight_layout()
+    fig.legend(loc="upper center",
+               bbox_to_anchor=(0.5, 1.005),
+               ncol=2,
+               handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
+               labels=["read latency", "write latency"])
+    fig.text(0.02, 0.5, "microseconds", va="center", rotation="vertical")
     chart_path = "metrics/network_latency_experiment.pdf"
     fig.savefig(chart_path)
     _logger.info(f"Created {chart_path}")
@@ -134,7 +135,7 @@ def chart_unavailability():
                ncol=2,
                handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
                labels=["reads", "writes"])
-    fig.text(0.04, 0.5, "Operations per millisecond", va="center", rotation="vertical")
+    fig.text(0.04, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.subplots_adjust(hspace=0.4)
     chart_path = "metrics/unavailability_experiment.pdf"
     fig.savefig(chart_path)
