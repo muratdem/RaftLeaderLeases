@@ -39,6 +39,7 @@ def main():
     raw_params.update({
         "one_way_latency_mean": list(range(50, 501, 50)),
         "lease_enabled": [False, True],
+        "seed": 1,
     })
 
     for params in all_param_combos(raw_params):

@@ -37,6 +37,7 @@ PARAMS.update({
     # Trigger the stepdown nemesis 1/3 of the way into the experiment.
     # Set each 1/3 of the experiment to the lease timeout.
     "stepdown_time": LEASE_TIMEOUT,
+    "seed": 1,
 })
 
 SUB_EXPERIMENT_PARAMS = []
