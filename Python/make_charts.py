@@ -8,6 +8,7 @@ _logger = logging.getLogger("chart")
 
 BARWIDTH = 10
 LINEWIDTH = 2
+FIGSIZE = (5, 5)  # Matplotlib default is 6.4 x 4.8.
 
 
 def chart_network_latency():
@@ -17,10 +18,8 @@ def chart_network_latency():
 
     df_no_lease = df[df["lease_enabled"] == False]
     df_lease = df[df["lease_enabled"] == True]
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True)
-    ax1.set(title="Latency of linearizable writes and reads (no leases)")
-    ax2.set(title="Latency of linearizable writes and reads (with leases)",
-            xlabel="one-way network latency (μs)")
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True, figsize=FIGSIZE)
+    ax2.set(xlabel="one-way network latency (μs)")
 
     for df, ax in [(df_no_lease, ax1),
                    (df_lease, ax2)]:
@@ -47,8 +46,11 @@ def chart_network_latency():
                ncol=2,
                handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
                labels=["read latency", "write latency"])
-    fig.text(0.02, 0.5, "microseconds", va="center", rotation="vertical")
+    fig.text(0.002, 0.55, "microseconds", va="center", rotation="vertical")
+    fig.text(0.95, 0.75, "no leases", va="center", rotation="vertical")
+    fig.text(0.95, 0.25, "LeaseGuard", va="center", rotation="vertical")
     chart_path = "metrics/network_latency_experiment.pdf"
+    fig.tight_layout()
     fig.savefig(chart_path)
     _logger.info(f"Created {chart_path}")
 
@@ -57,7 +59,8 @@ def chart_unavailability():
     from unavailability_experiment import SUB_EXPERIMENT_PARAMS
 
     csv = pd.read_csv("metrics/unavailability_experiment.csv")
-    fig, axes = plt.subplots(len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True)
+    fig, axes = plt.subplots(
+        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=FIGSIZE)
 
     def resample_data(lease_enabled,
                       inherit_lease_enabled,
@@ -87,7 +90,6 @@ def chart_unavailability():
     for i, df in enumerate(dfs):
         ax = axes[i]
         sub_exp_params = SUB_EXPERIMENT_PARAMS[i]
-        ax.set(title=sub_exp_params["title"])
         # Remove borders
         for spine in ax.spines.values():
             spine.set_visible(False)
@@ -114,20 +116,23 @@ def chart_unavailability():
             x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,
             color="purple",
             linestyle="dotted")
+        ax.text(1.02, 0.5, sub_exp_params.title, va="center", ha="center",
+                rotation="vertical",
+                transform=ax.transAxes)
 
-    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time /1000,
+    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time / 1000,
                  int(y_lim * 0.8),
                  "leader crash →  ",
                  color="red",
                  horizontalalignment="right")
     axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                 + SUB_EXPERIMENT_PARAMS[0].election_timeout) / 1000 + 45,
+                  + SUB_EXPERIMENT_PARAMS[0].election_timeout) / 1000 + 45,
                  int(y_lim * 0.8),
                  "← new leader elected",
                  color="green",
                  bbox=dict(facecolor="white", edgecolor="none"))
     axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                 + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 + 45,
+                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 + 45,
                  int(y_lim * 0.5),
                  "← old lease expires", color="purple")
     fig.legend(loc="upper center",
@@ -135,8 +140,9 @@ def chart_unavailability():
                ncol=2,
                handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
                labels=["reads", "writes"])
-    fig.text(0.04, 0.5, "operations per millisecond", va="center", rotation="vertical")
-    fig.subplots_adjust(hspace=0.4)
+    fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
+    fig.tight_layout()
+    fig.subplots_adjust(hspace=0.4, top=0.92)
     chart_path = "metrics/unavailability_experiment.pdf"
     fig.savefig(chart_path)
     _logger.info(f"Created {chart_path}")
@@ -144,5 +150,6 @@ def chart_unavailability():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
+    plt.rcParams.update({"font.size": 11})
     chart_network_latency()
     chart_unavailability()

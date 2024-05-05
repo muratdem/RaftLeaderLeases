@@ -41,10 +41,10 @@ PARAMS.update({
 
 SUB_EXPERIMENT_PARAMS = []
 for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
-    (False, False, False, "Throughput without leases"),
-    (True, False, False, "Throughput with leases, no inherited read lease"),
-    (True, True, False, "Throughput with inherited read lease"),
-    (True, True, True, "Throughput with deferred commit"),
+    (False, False, False, "no leases"),
+    (True, False, False, "unoptimized\nLeaseGuard"),
+    (True, True, False, "inherited\nread lease"),
+    (True, True, True, "deferred\ncommit"),
 ]:
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
