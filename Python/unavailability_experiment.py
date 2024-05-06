@@ -42,7 +42,7 @@ PARAMS.update({
 SUB_EXPERIMENT_PARAMS = []
 for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
     (False, False, False, "no leases"),
-    (True, False, False, "unoptimized\nLeaseGuard"),
+    (True, False, False, "unoptimized\nleases"),
     (True, True, False, "inherited\nread lease"),
     (True, True, True, "deferred\ncommit"),
 ]:

@@ -94,28 +94,31 @@ def chart_unavailability():
         for spine in ax.spines.values():
             spine.set_visible(False)
 
-        if len(df) == 0:
-            continue
+        if len(df) > 0:
+            for column in ["reads", "writes"]:
+                ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
+                        df[column],
+                        label=column)
+                ax.set_ylim(0, y_lim)
 
-        for column in ["reads", "writes"]:
-            ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
-                    df[column],
-                    label=column)
-            ax.set_ylim(0, y_lim)
-
-        # These parameters are in microseconds, the x axis is in milliseconds.
+        # sub_exp_params are in microseconds, the x axis is in milliseconds.
+        # Leader crash.
         ax.axvline(
             x=sub_exp_params.stepdown_time / 1000,
             color="red",
             linestyle="dotted")
+        # New leader elected.
         ax.axvline(
             x=(sub_exp_params.stepdown_time + sub_exp_params.election_timeout) / 1000,
             color="green",
             linestyle="dotted")
-        ax.axvline(
-            x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,
-            color="purple",
-            linestyle="dotted")
+        if sub_exp_params.lease_enabled:
+            # Old lease expires.
+            ax.axvline(
+                x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,
+                color="purple",
+                linestyle="dotted")
+
         ax.text(1.02, 0.5, sub_exp_params.title, va="center", ha="center",
                 rotation="vertical",
                 transform=ax.transAxes)
@@ -126,15 +129,17 @@ def chart_unavailability():
                  color="red",
                  horizontalalignment="right")
     axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                  + SUB_EXPERIMENT_PARAMS[0].election_timeout) / 1000 + 45,
+                  + SUB_EXPERIMENT_PARAMS[0].election_timeout) / 1000 + 50,
                  int(y_lim * 0.8),
                  "← new leader elected",
-                 color="green",
-                 bbox=dict(facecolor="white", edgecolor="none"))
-    axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 + 45,
-                 int(y_lim * 0.5),
-                 "← old lease expires", color="purple")
+                 color="green")
+    axes[1].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
+                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 - 50,
+                 int(y_lim * 0.75),
+                 "old lease expires → ",
+                 color="purple",
+                 bbox=dict(facecolor="white", edgecolor="none"),
+                 horizontalalignment="right")
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.5, 1.005),
                ncol=2,
