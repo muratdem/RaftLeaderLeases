@@ -8,7 +8,7 @@ from client import ClientLogEntry
 from params import BASE_PARAMS
 from lease_guard import Network, Node, Role, setup_logging
 from prob import PRNG
-from run_raft_with_params import reader, writer
+from run_with_params import reader, writer
 from simulate import get_current_ts, get_event_loop, sleep
 
 _logger = logging.getLogger("experiment")
