@@ -42,7 +42,7 @@ def chart_network_latency():
                 ax.bar_label(rects, padding=3)
 
     fig.legend(loc="upper center",
-               bbox_to_anchor=(0.48, 1.03),
+               bbox_to_anchor=(0.48, 1.02),
                ncol=2,
                handles=[Rectangle((0, 0), width=BARWIDTH, height=BARWIDTH, color=color)
                         for color in ["C0", "C1"]],
@@ -151,7 +151,7 @@ def chart_unavailability():
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
-    plt.rcParams.update({"font.size": 11})
+    plt.rcParams.update({"font.size": 12})
     font_path = "cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
     font_manager.fontManager.addfont(font_path)
     font_properties = font_manager.FontProperties(fname=font_path)
