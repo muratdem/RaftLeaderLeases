@@ -4,7 +4,7 @@ import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.lines import Line2D
-from matplotlib.patches import Rectangle
+from matplotlib.patches import Patch
 
 _logger = logging.getLogger("chart")
 
@@ -23,7 +23,7 @@ def chart_network_latency():
 
     for df, ax in [(df_no_lease, ax1),
                    (df_lease, ax2)]:
-        ax.set_ylim(-0.05 * max_y, 1.05 * max_y)
+        ax.set_ylim(-0.05 * max_y, 1.1 * max_y)
         # Remove borders
         for spine in ax.spines.values():
             spine.set_visible(False)
@@ -44,8 +44,9 @@ def chart_network_latency():
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.48, 1.02),
                ncol=2,
-               handles=[Rectangle((0, 0), width=BARWIDTH, height=BARWIDTH, color=color)
-                        for color in ["C0", "C1"]],
+               handles=[Patch(color=color) for color in ["C0", "C1"]],
+               handleheight=0.65,
+               handlelength=0.65,
                labels=["read latency", "write latency"])
     fig.text(0.002, 0.55, "microseconds", va="center", rotation="vertical")
     fig.text(0.95, 0.75, "no leases", va="center", rotation="vertical")
@@ -82,7 +83,7 @@ def chart_unavailability():
     dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
     # Use max read throughput as y limit. Max write throughput could be very high.
     y_lim = 2 * max(df["reads"].max() for df in dfs)
-    axes[-1].set(xlabel="Milliseconds")
+    axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, df in enumerate(dfs):
         ax = axes[i]

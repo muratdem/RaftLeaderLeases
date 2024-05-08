@@ -13,7 +13,7 @@ from simulate import get_current_ts, get_event_loop, sleep
 
 _logger = logging.getLogger("experiment")
 
-NUM_OPERATIONS = 10 * 1000
+NUM_OPERATIONS = 6500
 # Long lease to explore inherited read lease optimization.
 LEASE_TIMEOUT = 2 * BASE_PARAMS.election_timeout
 # Ensure operations continue before, during, after lease interregnum.
@@ -33,9 +33,9 @@ PARAMS.update({
     "heartbeat_rate": LEASE_TIMEOUT // 2,
     "operations": NUM_OPERATIONS,
     # Ensure operations continue before, during, after lease interregnum.
-    "interarrival": (LEASE_TIMEOUT * 2) // NUM_OPERATIONS,
-    # Slow replication so new leader must catch up gradually.
-    "log_write_micros": int(LOG_WRITE_SPEED_RATIO * INTERARRIVAL),
+    "interarrival": 300,
+    # SSD I/O latency.
+    "log_write_micros": 250,
     # No effect on performance stats, but keeps lists from growing too long.
     "keyspace_size": NUM_OPERATIONS,
     "seed": 1,

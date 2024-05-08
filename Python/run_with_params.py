@@ -211,7 +211,7 @@ async def main_coro(params: DictConfig, jumpstart_election=False) -> dict:
     # Schedule some tasks with Poisson start times. Each does one read or one write.
     for i in range(params.operations):
         start_ts += round(prng.exponential(params.interarrival))
-        if prng.randint(0, 2) == 0:
+        if prng.randint(0, 1) == 0:
             coro = writer(
                 client_id=i,
                 start_ts=start_ts,
