@@ -1,5 +1,6 @@
 import logging
 
+import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.lines import Line2D
@@ -121,17 +122,17 @@ def chart_unavailability():
 
     axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time / 1000 + 40,
                  int(y_lim * 0.85),
-                 "← leader crash",
+                 r"$\leftarrow$ leader crash",
                  color="red",
                  bbox=dict(facecolor="white", edgecolor="none"))
     axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepup_time / 1000 + 40,
                  int(y_lim * 0.6),
-                 "← new leader elected",
+                 r"$\leftarrow$ new leader elected",
                  color="green")
     axes[1].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
                   + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 - 40,
                  int(y_lim * 0.75),
-                 "old lease expires → ",
+                 r"old lease expires $\rightarrow$ ",
                  color="purple",
                  bbox=dict(facecolor="white", edgecolor="none"),
                  horizontalalignment="right")
@@ -151,5 +152,9 @@ def chart_unavailability():
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 11})
+    font_path = "cmunrm.ttf"  # Computer Modern Roman, like Latex's default.
+    font_manager.fontManager.addfont(font_path)
+    font_properties = font_manager.FontProperties(fname=font_path)
+    plt.rcParams["font.family"] = font_properties.get_name()
     chart_network_latency()
     chart_unavailability()
