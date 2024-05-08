@@ -24,18 +24,20 @@ LOG_WRITE_SPEED_RATIO = 0.7
 
 PARAMS = BASE_PARAMS.copy()
 PARAMS.update({
+    # Trigger the stepdown nemesis part way into the experiment.
+    "stepdown_time": LEASE_TIMEOUT // 2,
+    "stepup_time": LEASE_TIMEOUT // 2 + BASE_PARAMS.election_timeout,
     "lease_timeout": LEASE_TIMEOUT,
+    # We'll trigger a step-up manually, for reliability.
+    "election_timeout": int(1e7),
     "heartbeat_rate": LEASE_TIMEOUT // 2,
     "operations": NUM_OPERATIONS,
     # Ensure operations continue before, during, after lease interregnum.
-    "interarrival": (LEASE_TIMEOUT * 3) // NUM_OPERATIONS,
+    "interarrival": (LEASE_TIMEOUT * 2) // NUM_OPERATIONS,
     # Slow replication so new leader must catch up gradually.
     "log_write_micros": int(LOG_WRITE_SPEED_RATIO * INTERARRIVAL),
     # No effect on performance stats, but keeps lists from growing too long.
     "keyspace_size": NUM_OPERATIONS,
-    # Trigger the stepdown nemesis 1/3 of the way into the experiment.
-    # Set each 1/3 of the experiment to the lease timeout.
-    "stepdown_time": LEASE_TIMEOUT,
     "seed": 1,
 })
 
@@ -75,7 +77,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
     nodes[1].become_candidate()  # Jumpstart election.
 
     async def stepdown_nemesis():
-        """After a while, step down the primary and elect another node."""
+        """After a while, step down the primary."""
         await sleep(params.stepdown_time)
         primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
         assert len(primaries) == 1
@@ -84,8 +86,19 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
         # After election timeout, the same or a different node will step up.
         primary.stepdown()
 
+    async def stepup_task():
+        """After a while, manually step up a node."""
+        await sleep(params.stepup_time)
+        primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
+        assert len(primaries) == 0
+        secondary = nodes[2]
+        _logger.info(f"Nemesis stepping up {secondary}")
+        # After election timeout, the same or a different node will step up.
+        secondary.become_candidate()
+
     lp = get_event_loop()
-    tasks = [lp.create_task("stepdown", coro=stepdown_nemesis())]
+    tasks = [lp.create_task("stepdown", coro=stepdown_nemesis()),
+             lp.create_task("stepup", coro=stepup_task())]
 
     while not any(n.commit_index >= 0 for n in nodes.values()):
         await sleep(100)
@@ -140,10 +153,10 @@ def main():
             "lease_enabled": sub_exp_params.lease_enabled,
             "inherit_lease_enabled": sub_exp_params.inherit_lease_enabled,
             "defer_commit_enabled": sub_exp_params.defer_commit_enabled,
-            "execution_ts": entry.execution_ts,
+            "end_ts": entry.end_ts,
             "writes": 1 if entry.op_type is ClientLogEntry.OpType.ListAppend else 0,
             "reads": 1 if entry.op_type is ClientLogEntry.OpType.Read else 0,
-        } for entry in client_log]
+        } for entry in client_log if entry.success]
 
         if csv_writer is None:
             csv_writer = csv.DictWriter(csv_file, fieldnames=stats[0].keys())

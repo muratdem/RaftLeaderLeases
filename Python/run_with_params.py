@@ -33,7 +33,8 @@ async def reader(
     _logger.info(f"Client {client_id} reading key {key} from {node}")
     entry = await client_read(node=node, key=key)
     if entry.success:
-        _logger.info(f"Client {client_id} read key {key}={entry.value} from {node}")
+        _logger.info(f"Client {client_id} read key {key}={entry.value} from {node}"
+                     f" ({entry.execution_ts})")
         client_log.append(entry)
     else:
         _logger.error(f"Failed to read key {key} from {node}: {entry.exception}")
@@ -59,7 +60,8 @@ async def writer(
     entry = await client_write(node=node, key=key, value=client_id)
     client_log.append(entry)
     if entry.success:
-        _logger.info(f"Client {client_id} appended key {key}+={client_id}")
+        _logger.info(f"Client {client_id} appended key {key}+={client_id}"
+                     f" ({entry.execution_ts})")
     else:
         _logger.error(
             f"Failed appending key {key}+={client_id} on {node}: {entry.exception}")

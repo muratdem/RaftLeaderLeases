@@ -632,8 +632,9 @@ class Node:
             self._reset_election_deadline()
 
     def _reset_election_deadline(self):
-        self.election_deadline = (self.clock.now() + self.election_timeout
-                                  + self.prng.randint(0, self.prng._one_way_latency_mean * 2))
+        self.election_deadline = (
+            self.clock.now() + self.election_timeout
+            + self.prng.randint(0, self.prng._one_way_latency_mean * 2))
 
     def __str__(self) -> str:
         return f"Node {self.node_id} {self.role.name}"

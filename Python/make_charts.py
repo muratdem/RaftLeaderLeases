@@ -72,12 +72,8 @@ def chart_unavailability():
             & (csv["defer_commit_enabled"] == defer_commit_enabled)
             ].copy()
 
-        # Maybe I'm debugging unavailability_experiment.py didn't generate all the data.
-        if len(df_micros) == 0:
-            _logger.warning("No data")
-            return df_micros
-
-        df_micros["timestamp"] = pd.to_datetime(df_micros["execution_ts"], unit="us")
+        df_micros.sort_values(by=["end_ts"], inplace=True)
+        df_micros["timestamp"] = pd.to_datetime(df_micros["end_ts"], unit="us")
         resampled = df_micros.resample("10ms", on="timestamp").sum()
         # Remove first and last rows, which have low throughput due to artifacts.
         return resampled[["reads", "writes"]].iloc[1:-1]
@@ -109,7 +105,7 @@ def chart_unavailability():
             linestyle="dotted")
         # New leader elected.
         ax.axvline(
-            x=(sub_exp_params.stepdown_time + sub_exp_params.election_timeout) / 1000,
+            x=(sub_exp_params.stepup_time) / 1000,
             color="green",
             linestyle="dotted")
         if sub_exp_params.lease_enabled:
@@ -123,18 +119,17 @@ def chart_unavailability():
                 rotation="vertical",
                 transform=ax.transAxes)
 
-    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time / 1000,
-                 int(y_lim * 0.8),
-                 "leader crash →  ",
+    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time / 1000 + 40,
+                 int(y_lim * 0.85),
+                 "← leader crash",
                  color="red",
-                 horizontalalignment="right")
-    axes[0].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                  + SUB_EXPERIMENT_PARAMS[0].election_timeout) / 1000 + 50,
-                 int(y_lim * 0.8),
+                 bbox=dict(facecolor="white", edgecolor="none"))
+    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepup_time / 1000 + 40,
+                 int(y_lim * 0.6),
                  "← new leader elected",
                  color="green")
     axes[1].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 - 50,
+                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 - 40,
                  int(y_lim * 0.75),
                  "old lease expires → ",
                  color="purple",
