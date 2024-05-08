@@ -1,6 +1,6 @@
 """Linearizability checking algorithm, for inclusion in the paper.
 
-See run_raft_with_params.py for the executable version.
+See run_with_params.py for the executable version.
 """
 
 def check_linearizability(history):

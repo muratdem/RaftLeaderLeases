@@ -5,7 +5,7 @@ import time
 
 from client import ClientLogEntry
 from params import BASE_PARAMS
-from run_raft_with_params import main_coro
+from run_with_params import main_coro
 from simulate import get_event_loop
 
 _logger = logging.getLogger("experiment")

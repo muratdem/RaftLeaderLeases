@@ -10,6 +10,6 @@ Python folder includes a simulator for the same protocol as the TLA+ spec.
 * lease_guard.py: implementation of Raft with LeaseGuard.
 * lease_guard_test.py: unittests for lease_guard.py.
 * run_with_params.py: simulate Raft and LeaseGuard with reads, writes, and partitions.
-* params.py: parameters for run_raft_with_params.py.
+* params.py: parameters for run_with_params.py.
 * unavailability_experiment.py: simulate a leader failure and recovery, create unavailability_experiment.csv.
 * network_latency_experiment.py: test effect of latency on read/write speed, create network_latency_experiment.csv.
