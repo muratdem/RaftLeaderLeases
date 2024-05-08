@@ -3,12 +3,9 @@ import logging
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.lines import Line2D
+from matplotlib.patches import Rectangle
 
 _logger = logging.getLogger("chart")
-
-BARWIDTH = 10
-LINEWIDTH = 2
-FIGSIZE = (5, 5)  # Matplotlib default is 6.4 x 4.8.
 
 
 def chart_network_latency():
@@ -18,8 +15,10 @@ def chart_network_latency():
 
     df_no_lease = df[df["lease_enabled"] == False]
     df_lease = df[df["lease_enabled"] == True]
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True, figsize=FIGSIZE)
+    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True, figsize=(5, 3))
     ax2.set(xlabel="one-way network latency (μs)")
+    BARWIDTH = 10
+    LINEWIDTH = 2
 
     for df, ax in [(df_no_lease, ax1),
                    (df_lease, ax2)]:
@@ -42,9 +41,10 @@ def chart_network_latency():
                 ax.bar_label(rects, padding=3)
 
     fig.legend(loc="upper center",
-               bbox_to_anchor=(0.5, 1.005),
+               bbox_to_anchor=(0.48, 1.03),
                ncol=2,
-               handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
+               handles=[Rectangle((0, 0), width=BARWIDTH, height=BARWIDTH, color=color)
+                        for color in ["C0", "C1"]],
                labels=["read latency", "write latency"])
     fig.text(0.002, 0.55, "microseconds", va="center", rotation="vertical")
     fig.text(0.95, 0.75, "no leases", va="center", rotation="vertical")
@@ -60,7 +60,7 @@ def chart_unavailability():
 
     csv = pd.read_csv("metrics/unavailability_experiment.csv")
     fig, axes = plt.subplots(
-        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=FIGSIZE)
+        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 5))
 
     def resample_data(lease_enabled,
                       inherit_lease_enabled,
