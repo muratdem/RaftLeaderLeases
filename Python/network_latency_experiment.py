@@ -45,7 +45,7 @@ def main():
         "seed": 1,
     })
 
-    for latency in range(50, 501, 50):
+    for latency in range(100, 501, 100):
         for lease_enabled in [True, False]:
             params = raw_params.copy()
             params.update({

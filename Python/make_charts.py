@@ -10,50 +10,52 @@ _logger = logging.getLogger("chart")
 
 
 def chart_network_latency():
-    df = pd.read_csv("metrics/network_latency_experiment.csv")
-    columns = ["read_latency", "write_latency"]
-    max_y = max([max(df[c]) for c in columns])
+    csv = pd.read_csv("metrics/network_latency_experiment.csv")
+    df_no_lease = csv[csv["lease_enabled"] == False]
+    df_lease = csv[csv["lease_enabled"] == True]
 
-    df_no_lease = df[df["lease_enabled"] == False]
-    df_lease = df[df["lease_enabled"] == True]
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, sharey=True, figsize=(5, 3))
-    ax2.set(xlabel="one-way network latency (μs)")
-    BARWIDTH = 10
+    BARWIDTH = 6
     LINEWIDTH = 2
+    fig, ax = plt.subplots(figsize=(5, 3))
+    ax.set(xlabel="one-way network latency (μs)")
+    ax.tick_params(axis="x", bottom=False)
 
-    for df, ax in [(df_no_lease, ax1),
-                   (df_lease, ax2)]:
-        ax.set_ylim(-0.05 * max_y, 1.1 * max_y)
-        # Remove borders
-        for spine in ax.spines.values():
-            spine.set_visible(False)
-        for i, column in enumerate(columns):
-            is_zeros = (df[column] == 0).all()
-            rects = ax.bar(
-                df_lease["one_way_latency_mean"] + i * (BARWIDTH + LINEWIDTH * 2),
-                df[column],
-                BARWIDTH,
-                label=column,
-                color=f"C{i}",
-                edgecolor=f"C{i}",
-                linewidth=LINEWIDTH)
+    for offset, color, df, column in [
+        (-2, "C1", df_no_lease, "write_latency"),
+        (-1, "C0", df_no_lease, "read_latency"),
+        (1, "C1", df_lease, "write_latency"),
+        (2, "C0", df_lease, "read_latency"),
+    ]:
+        is_zeros = (df[column] == 0).all()
+        rects = ax.bar(
+            df["one_way_latency_mean"] + offset * (BARWIDTH + LINEWIDTH * 2),
+            df[column],
+            BARWIDTH,
+            label=column,
+            color=color,
+            edgecolor=color,
+            linewidth=LINEWIDTH)
 
-            if is_zeros:
-                ax.bar_label(rects, padding=3)
+        if is_zeros:
+            ax.bar_label(rects, padding=3)
 
     fig.legend(loc="upper center",
-               bbox_to_anchor=(0.48, 1.02),
+               bbox_to_anchor=(0.5, .95),
                ncol=2,
                handles=[Patch(color=color) for color in ["C0", "C1"]],
                handleheight=0.65,
                handlelength=0.65,
                labels=["read latency", "write latency"])
     fig.text(0.002, 0.55, "microseconds", va="center", rotation="vertical")
-    fig.text(0.95, 0.75, "no leases", va="center", rotation="vertical")
-    fig.text(0.95, 0.25, "LeaseGuard", va="center", rotation="vertical")
-    chart_path = "metrics/network_latency_experiment.pdf"
+
+    # Remove chart borders
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
     fig.tight_layout()
-    fig.savefig(chart_path)
+    fig.subplots_adjust(top=0.9)
+    chart_path = "metrics/network_latency_experiment.pdf"
+    fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
 
@@ -146,7 +148,7 @@ def chart_unavailability():
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
     chart_path = "metrics/unavailability_experiment.pdf"
-    fig.savefig(chart_path)
+    fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
 
