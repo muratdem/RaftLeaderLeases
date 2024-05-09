@@ -42,10 +42,18 @@ def chart_network_latency():
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.5, .95),
                ncol=2,
-               handles=[Patch(color=color) for color in ["C0", "C1"]],
+               handles=[Patch(color=color) for color in ["C1", "C0"]],
                handleheight=0.65,
                handlelength=0.65,
-               labels=["read latency", "write latency"])
+               labels=["write latency", "read latency"])
+    ax.text(df_no_lease["one_way_latency_mean"].min() - 3 * BARWIDTH - 2 * LINEWIDTH,
+            df_no_lease["write_latency"].min() + 50,
+            r"$\leftarrow$ no lease",
+            rotation="vertical")
+    ax.text(df_lease["one_way_latency_mean"].min() + BARWIDTH + LINEWIDTH,
+            df_lease["write_latency"].min() + 50,
+            r"$\leftarrow$ lease",
+            rotation="vertical")
     fig.text(0.002, 0.55, "microseconds", va="center", rotation="vertical")
 
     # Remove chart borders
@@ -142,8 +150,8 @@ def chart_unavailability():
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.5, 1.005),
                ncol=2,
-               handles=[Line2D([0], [0], color=color) for color in ["C0", "C1"]],
-               labels=["reads", "writes"])
+               handles=[Line2D([0], [0], color=color) for color in ["C1", "C0"]],
+               labels=["writes", "reads"])
     fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
