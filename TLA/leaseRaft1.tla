@@ -16,6 +16,17 @@ VARIABLE clock
 VARIABLE lease
 VARIABLE latestRead
 
+Entry == [term: Int, clock: Int, index: Int]
+Lease == [term: Int, expires: Int]
+TypeOK == 
+    /\ currentTerm \in [Server -> Int]
+    /\ state \in [Server -> {Leader, Follower}]
+    /\ log \in [Server -> Seq(Entry)]
+    /\ committed \in SUBSET Entry
+    /\ clock \in Int
+    /\ lease \in [Server -> Lease]
+    /\ latestRead \in Entry
+
 vars == <<currentTerm, state, log, committed, clock, lease, latestRead>>
 
 \*
@@ -26,18 +37,18 @@ vars == <<currentTerm, state, log, committed, clock, lease, latestRead>>
 Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j) 
 
-MaxCommitted(S) == IF Cardinality(S) = 0 THEN [entry |-> <<0,0>>]
-                   ELSE CHOOSE i \in S: (\A j \in S: i.entry[1]>=j.entry[1]) 
+CreateEntry(xterm, xclock, xindex) == [term |-> xterm, clock |-> xclock, index |-> xindex]
+CreateLease(xterm, xclock) == [term |-> xterm, expires |-> xclock]
+
+MaxCommitted(S) == IF Cardinality(S) = 0 THEN CreateEntry(0, 0, 0)
+                   ELSE CHOOSE i \in S: (\A j \in S: i.index >= j.index) 
 
 
-\* Is log entry e = <<index, term>> in the log of node 'i'.
-InLog(e, i) == \E x \in DOMAIN log[i] : x = e[1] /\ log[i][x] = e[2]
+\* Is log entry e in the log of node 'i'.
+InLog(e, i) == log[i][e.index] = e
 
 \* The term of the last entry in a log, or 0 if the log is empty.
-LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)][1]
-LastEntry(xlog) == <<Len(xlog),xlog[Len(xlog)]>>
-GetTerm(xlog, index) == IF index = 0 THEN 0 ELSE xlog[index]
-LogTerm(i, index) == GetTerm(log[i], index)
+LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
 
 \* The set of all quorums in a given set.
 Quorums(S) == {i \in SUBSET(S) : Cardinality(i) * 2 > Cardinality(S)}
@@ -63,14 +74,12 @@ CanVoteForOplog(i, j, term) ==
     /\ currentTerm[i] < term
     /\ logOk
 
-\* Is a log entry 'e'=<<i, t>> immediately committed in term 't' with a quorum 'Q'.
-ImmediatelyCommitted(e, Q) == 
-    LET eind == e[1] 
-        eterm == e[2][1] IN
+\* Is a log entry 'e' immediately committed with a quorum 'Q'.
+ImmediatelyCommitted(index, e, Q) == 
     \A s \in Q :
-        /\ Len(log[s]) >= eind
-        /\ InLog(e, s) \* they have the entry.
-        /\ currentTerm[s] = eterm  \* they are in the same term as the log entry. 
+        /\ Len(log[s]) >= index
+        /\ log[s][index] = e
+        /\ currentTerm[s] = e.term  \* they are in the same term as the log entry. 
 
 \* Helper operator for actions that propagate the term between two nodes.
 UpdateTermsExpr(i, j) ==
@@ -88,18 +97,18 @@ UpdateTermsExpr(i, j) ==
 \* in its log.    
 ClientWrite(i) ==
     /\ state[i] = Leader
-    /\ (lease[i].time < clock \/ lease[i].term = currentTerm[i])
+    /\ (lease[i].expires < clock \/ lease[i].term = currentTerm[i])
     /\ clock' = clock + 1     
-    /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock'>>)]
+    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], clock', Len(log[i]) + 1))]
     /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
 
 ClientRead(i) ==
     /\ state[i] = Leader
 \*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
-    /\ lease[i].time >= clock
-    /\ LET cInd == MaxCommitted(committed).entry[1] 
+    /\ lease[i].expires >= clock
+    /\ LET cInd == MaxCommitted(committed).index
            l == Len(log[i]) IN
-        /\ latestRead' = IF cInd = 0 THEN <<0,0>>
+        /\ latestRead' = IF cInd = 0 THEN CreateEntry(0, 0, 0)
                          ELSE log[i][cInd] \* Raft guarantees cInd <= l
     /\ UNCHANGED <<currentTerm, state, log, committed, clock, lease>>
 
@@ -122,8 +131,8 @@ GetEntries(i, j) ==
               newLog        == Append(log[i], newEntry) IN
               /\ log' = [log EXCEPT ![i] = newLog]
               /\ lease' = [lease EXCEPT ![i] =  
-                            IF lease[i].term <= newEntry[1] 
-                            THEN [term |-> newEntry[1], time|->newEntry[2]+Delta]
+                            IF lease[i].term <= newEntry.term
+                            THEN CreateLease(newEntry.term, newEntry.clock+Delta)
                             ELSE lease[i]]
     /\ UNCHANGED <<committed, currentTerm, state, clock, latestRead>>
 
@@ -150,24 +159,22 @@ BecomeLeader(i, voteQuorum) ==
             
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
-    LET ind == Len(log[i]) IN
     \* Must have some entries to commit.
-    /\ ind > 0
+    /\ Len(log[i]) > 0
     \* This node is leader.
     /\ state[i] = Leader
-    \* The entry was written by this leader.
-    /\ log[i][ind][1] = currentTerm[i]
-    \* all nodes have this log entry and are in the term of the leader.
-    /\ ImmediatelyCommitted(<<ind,log[i][ind]>>, commitQuorum)
-    \* Don't mark an entry as committed more than once.
-    /\ ~\E c \in committed : c.entry = <<ind, log[i][ind]>>
-    /\ committed' = committed \cup
-            {[ entry  |-> <<ind, log[i][ind]>>,
-               term  |-> currentTerm[i]]}
-    /\ latestRead' = log[i][ind]         
-    /\ lease' = [ lease EXCEPT ![i] = 
-                    [term |-> currentTerm[i] , time|->log[i][ind][2]+Delta] ]
-    /\ UNCHANGED <<currentTerm, state, log, clock>>
+    /\ LET ind == Len(log[i])
+           entry == log[i][ind] IN
+        \* The entry was written by this leader.
+        /\ entry.term = currentTerm[i]
+        \* all nodes have this log entry and are in the term of the leader.
+        /\ ImmediatelyCommitted(ind, entry, commitQuorum)
+        \* Don't mark an entry as committed more than once.
+        /\ entry \notin committed
+        /\ committed' = committed \cup {entry}
+        /\ latestRead' = entry         
+        /\ lease' = [lease EXCEPT ![i] = CreateLease(entry.term, entry.clock+Delta)]
+        /\ UNCHANGED <<currentTerm, state, log, clock>>
 
 \* Action that exchanges terms between two nodes and step down the Leader if
 \* needed. This can be safely specified as a separate action, rather than
@@ -189,8 +196,8 @@ Init ==
     /\ log = [i \in Server |-> <<>>]
     /\ committed = {}
     /\ clock = 0
-    /\ lease = [i \in Server |-> [term|-> -1, time|->-1] ]  
-    /\ latestRead = <<0,0>>
+    /\ lease = [i \in Server |-> CreateLease(-1, -1)]  
+    /\ latestRead = CreateEntry(0, 0, 0)
 
 Next == 
     \/ \E s \in Server : ClientWrite(s)
@@ -209,6 +216,11 @@ Spec == Init /\ [][Next]_vars
 \*
 \* Correctness properties
 \*
+
+EntryIndexes ==
+    \A s \in Server:
+        \A index \in DOMAIN log[s]:
+            log[s][index].index = index
 
 OneLeaderPerTerm == 
     \A s,t \in Server :
@@ -229,15 +241,15 @@ LogMatching ==
 \* A node elected as Leader contains all entries committed in previous terms
 LeaderCompleteness == 
     \A s \in Server : (state[s] = Leader) => 
-        \A c \in committed : (c.term < currentTerm[s] => InLog(c.entry, s))
+        \A c \in committed : (c.term < currentTerm[s] => InLog(c, s))
 
 \* If two entries are committed at the same index, they must be the same entry
 StateMachineSafety == 
-    \A c1, c2 \in committed : (c1.entry[1] = c2.entry[1]) => (c1 = c2)
+    \A c1, c2 \in committed : (c1.index = c2.index) => (c1 = c2)
 
 \* Linearizability of reads
 LinearizableReads == 
-    latestRead = IF Cardinality(committed) = 0 THEN <<0,0>>
-                 ELSE MaxCommitted(committed).entry[2]
+    latestRead = IF Cardinality(committed) = 0 THEN CreateEntry(0, 0, 0)
+                 ELSE MaxCommitted(committed)
  
 =============================================================================
