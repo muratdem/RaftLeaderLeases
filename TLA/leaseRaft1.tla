@@ -1,6 +1,6 @@
 ---- MODULE leaseRaft1 ----
 \*
-\* Basic, static version of MongoDB Raft protocol.
+\* Basic version of LeaseGuard protocol.
 \*
 
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
@@ -88,15 +88,15 @@ UpdateTermsExpr(i, j) ==
 \* in its log.    
 ClientWrite(i) ==
     /\ state[i] = Leader
-    /\ (lease[i][2] < clock \/ lease[i][1] = currentTerm[i])
+    /\ (lease[i].time < clock \/ lease[i].term = currentTerm[i])
     /\ clock' = clock + 1     
     /\ log' = [log EXCEPT ![i] = Append(log[i], <<currentTerm[i],clock'>>)]
     /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
 
 ClientRead(i) ==
     /\ state[i] = Leader
-\*  /\ lease[i][1] = currentTerm[i] \* new leader can serve read on old leader's lease!!
-    /\ lease[i][2] >= clock
+\*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
+    /\ lease[i].time >= clock
     /\ LET cInd == MaxCommitted(committed).entry[1] 
            l == Len(log[i]) IN
         /\ latestRead' = IF cInd = 0 THEN <<0,0>>
@@ -122,8 +122,8 @@ GetEntries(i, j) ==
               newLog        == Append(log[i], newEntry) IN
               /\ log' = [log EXCEPT ![i] = newLog]
               /\ lease' = [lease EXCEPT ![i] =  
-                            IF lease[i][1]<= newEntry[1] 
-                            THEN <<newEntry[1], newEntry[2]+Delta>>
+                            IF lease[i].term <= newEntry[1] 
+                            THEN [term |-> newEntry[1], time|->newEntry[2]+Delta]
                             ELSE lease[i]]
     /\ UNCHANGED <<committed, currentTerm, state, clock, latestRead>>
 
@@ -165,7 +165,8 @@ CommitEntry(i, commitQuorum) ==
             {[ entry  |-> <<ind, log[i][ind]>>,
                term  |-> currentTerm[i]]}
     /\ latestRead' = log[i][ind]         
-    /\ lease' = [lease EXCEPT ![i] = <<currentTerm[i], log[i][ind][2]+Delta>>]
+    /\ lease' = [ lease EXCEPT ![i] = 
+                    [term |-> currentTerm[i] , time|->log[i][ind][2]+Delta] ]
     /\ UNCHANGED <<currentTerm, state, log, clock>>
 
 \* Action that exchanges terms between two nodes and step down the Leader if
@@ -188,7 +189,7 @@ Init ==
     /\ log = [i \in Server |-> <<>>]
     /\ committed = {}
     /\ clock = 0
-    /\ lease = [i \in Server |-> <<-1,-1>>]  
+    /\ lease = [i \in Server |-> [term|-> -1, time|->-1] ]  
     /\ latestRead = <<0,0>>
 
 Next == 
