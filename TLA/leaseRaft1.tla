@@ -75,10 +75,10 @@ CanVoteForOplog(i, j, term) ==
     /\ logOk
 
 \* Is a log entry 'e' immediately committed with a quorum 'Q'.
-ImmediatelyCommitted(index, e, Q) == 
+ImmediatelyCommitted(e, Q) == 
     \A s \in Q :
-        /\ Len(log[s]) >= index
-        /\ log[s][index] = e
+        /\ Len(log[s]) >= e.index
+        /\ log[s][e.index] = e
         /\ currentTerm[s] = e.term  \* they are in the same term as the log entry. 
 
 \* Helper operator for actions that propagate the term between two nodes.
@@ -168,7 +168,7 @@ CommitEntry(i, commitQuorum) ==
         \* The entry was written by this leader.
         /\ entry.term = currentTerm[i]
         \* all nodes have this log entry and are in the term of the leader.
-        /\ ImmediatelyCommitted(ind, entry, commitQuorum)
+        /\ ImmediatelyCommitted(entry, commitQuorum)
         \* Don't mark an entry as committed more than once.
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
