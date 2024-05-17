@@ -1,9 +1,9 @@
 ---- MODULE mcLeaseRaftLogBased ----
 EXTENDS TLC, leaseRaftLogBased
 
-\* State Constraint. Used for model checking only.
 CONSTANTS MaxTerm, MaxLogLen, MaxClock
 
+\* Used for model checking only.
 StateConstraint ==
     /\ \A s \in Server :
         /\ currentTerm[s] <= MaxTerm
@@ -12,16 +12,15 @@ StateConstraint ==
 
 ServerSymmetry == Permutations(Server)
 
+\* Add info to error traces.
 Alias == [
     currentTerm |-> currentTerm,
     state |-> state,
     log |-> log,
+    replicationTimes |-> replicationTimes,
     committed |-> committed,
     clock |-> clock,
-    lease |-> lease,
     latestRead |-> latestRead,
-    n1MaxReplicated |-> MaxMajorityReplicatedEntry("n1"),
-    n2MaxReplicated |-> MaxMajorityReplicatedEntry("n2"),
-    n3MaxReplicated |-> MaxMajorityReplicatedEntry("n3")
+    whichServersHaveLeases |-> [s \in Server |-> [read |-> HasLease(s, TRUE), write |-> HasLease(s, TRUE)]]
 ]
 ====
