@@ -1,2 +1,4 @@
 states/
 mcLeaseRaftLogBased.toolbox/
+*_TTrace_*.bin
+*_TTrace_*.tla
