@@ -5,8 +5,8 @@
 
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 
-CONSTANTS Server
-CONSTANTS Follower, Leader, Nil, Delta
+CONSTANTS Server, Key, Delta
+CONSTANTS Follower, Leader, Nil
 
 VARIABLE currentTerm
 VARIABLE state
@@ -17,7 +17,7 @@ VARIABLE clock
 VARIABLE lease
 VARIABLE latestRead
 
-Entry == [term: Int, clock: Int, index: Int]
+Entry == [term: Int, clock: Int, key: Key, index: Int]
 Lease == [term: Int, expires: Int]
 TypeOK == 
     /\ currentTerm \in [Server -> Int]
@@ -26,7 +26,7 @@ TypeOK ==
     /\ committed \in SUBSET Entry
     /\ clock \in Int
     /\ lease \in [Server -> Lease]
-    /\ latestRead \in Entry
+    /\ latestRead \in [Key -> Entry]
 
 vars == <<currentTerm, state, log, committed, commitIndex, clock, lease, latestRead>>
 
@@ -40,15 +40,25 @@ Max(S) == CHOOSE i \in S: (\A j \in S: i>=j)
 Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
 
 
-CreateEntry(xterm, xclock, xindex) == [term |-> xterm, clock |-> xclock, index |-> xindex]
+CreateEntry(xterm, xclock, xkey, xindex) == [term |-> xterm, clock |-> xclock, key|-> xkey, index |-> xindex]
 CreateLease(xterm, xclock) == [term |-> xterm, expires |-> xclock]
 
-MaxCommitted(S) == IF Cardinality(S) = 0 THEN CreateEntry(0, 0, 0)
-                   ELSE CHOOSE i \in S: (\A j \in S: i.index >= j.index) 
+FilterKey(S,k) == {e \in S: e.key=k}
+MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0 THEN CreateEntry(0, 0, k, 0)
+                      ELSE CHOOSE i \in FilterKey(S,k): (\A j \in FilterKey(S,k): i.index >= j.index) 
 
 
 \* Is log entry e in the log of node 'i'.
 InLog(e, i) == log[i][e.index] = e
+
+\* Find latest entry for key in log of i with upper bound u as commitindex
+FindLatestKey(k,i,u) == 
+    IF u=0 THEN 0
+    ELSE 
+        IF ~(\E j \in 1..u: log[i][j].key=k) \* Raft guarantees cInd <= Len(log[i])
+            THEN 0
+            ELSE CHOOSE j \in 1..u: /\ log[i][j].key=k 
+                                    /\ \A l \in 1..u: log[i][l].key=k  => j>=l
 
 \* The term of the last entry in a log, or 0 if the log is empty.
 LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
@@ -98,20 +108,23 @@ UpdateTermsExpr(i, j) ==
 
 \* Node 'i', a Leader, handles a new client request and places the entry 
 \* in its log.    
-ClientWrite(i) ==
+ClientWrite(i, k) ==
     /\ state[i] = Leader
     /\ (lease[i].expires < clock \/ lease[i].term = currentTerm[i])
     /\ clock' = clock + 1     
-    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], clock', Len(log[i]) + 1))]
+    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], clock', k, Len(log[i]) + 1))]
     /\ UNCHANGED <<currentTerm, state, committed, commitIndex, lease, latestRead>>
 
-ClientRead(i) ==
+\* This may only set latestRead to an earlier value than what is committed, 
+\* and that would be caught by LinearizableReads invariant
+ClientRead(i,k) ==
     /\ state[i] = Leader
 \*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
     /\ lease[i].expires >= clock
-    /\ LET cInd == commitIndex[i] IN
-        /\ latestRead' = IF cInd = 0 THEN CreateEntry(0, 0, 0)
-                         ELSE log[i][cInd] \* Raft guarantees cInd <= Len(log[i])
+    /\ LET cInd == FindLatestKey(k, i, commitIndex[i]) IN
+        /\ latestRead' = [latestRead EXCEPT ![k] = 
+                            IF cInd = 0 THEN CreateEntry(0, 0, k, 0)
+                            ELSE log[i][cInd] ] \* Raft guarantees cInd <= Len(log[i])
     /\ UNCHANGED <<currentTerm, state, log, committed, commitIndex, clock, lease>>
 
 \* Node 'i' gets a new log entry from node 'j'.
@@ -179,7 +192,7 @@ CommitEntry(i, commitQuorum) ==
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
         /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
-        /\ latestRead' = entry         
+        /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]         
         /\ lease' = [lease EXCEPT ![i] = CreateLease(entry.term, entry.clock+Delta)]
         /\ UNCHANGED <<currentTerm, state, log, clock>>
 
@@ -205,11 +218,11 @@ Init ==
     /\ commitIndex = [i \in Server |-> 0]
     /\ clock = 0
     /\ lease = [i \in Server |-> CreateLease(-1, -1)]  
-    /\ latestRead = CreateEntry(0, 0, 0)
+    /\ latestRead = [k \in Key |-> CreateEntry(0, 0, k, 0)]
 
 Next == 
-    \/ \E s \in Server : ClientWrite(s)
-    \/ \E s \in Server : ClientRead(s)
+    \/ \E s \in Server : \E k \in Key : ClientWrite(s,k)
+    \/ \E s \in Server : \E k \in Key : ClientRead(s,k)
     \/ \E s, t \in Server : GetEntries(s, t) 
     \/ \E s, t \in Server : RollbackEntries(s, t)
     \/ \E s \in Server : \E Q \in Quorums(Server) : BecomeLeader(s, Q) 
@@ -255,9 +268,10 @@ LeaderCompleteness ==
 StateMachineSafety == 
     \A c1, c2 \in committed : (c1.index = c2.index) => (c1 = c2)
 
-\* Linearizability of reads
+\* Linearizability of reads, checking equality of latestRead map to the latest committed/acked write values
 LinearizableReads == 
-    latestRead = IF Cardinality(committed) = 0 THEN CreateEntry(0, 0, 0)
-                 ELSE MaxCommitted(committed)
+    latestRead = [ k \in Key |-> 
+                        IF Cardinality(committed) = 0 THEN CreateEntry(0, 0, k, 0)
+                        ELSE MaxCommitted(committed,k) ]
  
 =============================================================================
