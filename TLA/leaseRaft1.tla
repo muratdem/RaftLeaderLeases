@@ -121,6 +121,7 @@ ClientRead(i,k) ==
     /\ state[i] = Leader
 \*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
     /\ lease[i].expires >= clock
+    /\ FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) \* no limbo read allowed
     /\ LET cInd == FindLatestKey(k, i, commitIndex[i]) IN
         /\ latestRead' = [latestRead EXCEPT ![k] = 
                             IF cInd = 0 THEN CreateEntry(0, 0, k, 0)
@@ -179,10 +180,10 @@ BecomeLeader(i, voteQuorum) ==
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
     \* Must have some entries to commit.
-    /\ Len(log[i]) > 0
+    /\ commitIndex[i] < Len(log[i]) 
     \* This node is leader.
     /\ state[i] = Leader
-    /\ LET ind == Len(log[i])
+    /\ LET ind == commitIndex[i]+1
            entry == log[i][ind] IN
         \* The entry was written by this leader.
         /\ entry.term = currentTerm[i]
@@ -270,8 +271,6 @@ StateMachineSafety ==
 
 \* Linearizability of reads, checking equality of latestRead map to the latest committed/acked write values
 LinearizableReads == 
-    latestRead = [ k \in Key |-> 
-                        IF Cardinality(committed) = 0 THEN CreateEntry(0, 0, k, 0)
-                        ELSE MaxCommitted(committed,k) ]
+    latestRead = [ k \in Key |-> MaxCommitted(committed,k) ]
  
 =============================================================================
