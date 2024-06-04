@@ -12,6 +12,7 @@ VARIABLE currentTerm
 VARIABLE state
 VARIABLE log
 VARIABLE committed
+VARIABLE commitIndex
 VARIABLE clock
 VARIABLE lease
 VARIABLE latestRead
@@ -27,7 +28,7 @@ TypeOK ==
     /\ lease \in [Server -> Lease]
     /\ latestRead \in Entry
 
-vars == <<currentTerm, state, log, committed, clock, lease, latestRead>>
+vars == <<currentTerm, state, log, committed, commitIndex, clock, lease, latestRead>>
 
 \*
 \* Helper operators.
@@ -36,6 +37,8 @@ vars == <<currentTerm, state, log, committed, clock, lease, latestRead>>
 \* Is a sequence empty.
 Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j) 
+Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
+
 
 CreateEntry(xterm, xclock, xindex) == [term |-> xterm, clock |-> xclock, index |-> xindex]
 CreateLease(xterm, xclock) == [term |-> xterm, expires |-> xclock]
@@ -100,17 +103,16 @@ ClientWrite(i) ==
     /\ (lease[i].expires < clock \/ lease[i].term = currentTerm[i])
     /\ clock' = clock + 1     
     /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], clock', Len(log[i]) + 1))]
-    /\ UNCHANGED <<currentTerm, state, committed, lease, latestRead>>
+    /\ UNCHANGED <<currentTerm, state, committed, commitIndex, lease, latestRead>>
 
 ClientRead(i) ==
     /\ state[i] = Leader
 \*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
     /\ lease[i].expires >= clock
-    /\ LET cInd == MaxCommitted(committed).index
-           l == Len(log[i]) IN
+    /\ LET cInd == commitIndex[i] IN
         /\ latestRead' = IF cInd = 0 THEN CreateEntry(0, 0, 0)
-                         ELSE log[i][cInd] \* Raft guarantees cInd <= l
-    /\ UNCHANGED <<currentTerm, state, log, committed, clock, lease>>
+                         ELSE log[i][cInd] \* Raft guarantees cInd <= Len(log[i])
+    /\ UNCHANGED <<currentTerm, state, log, committed, commitIndex, clock, lease>>
 
 \* Node 'i' gets a new log entry from node 'j'.
 GetEntries(i, j) ==
@@ -134,6 +136,10 @@ GetEntries(i, j) ==
                             IF lease[i].term <= newEntry.term
                             THEN CreateLease(newEntry.term, newEntry.clock+Delta)
                             ELSE lease[i]]
+              /\ commitIndex' = [commitIndex EXCEPT ![i] = 
+                            IF commitIndex[i] < commitIndex[j]
+                            THEN Min ({commitIndex[j], Len(newLog)})
+                            ELSE commitIndex[i]]              
     /\ UNCHANGED <<committed, currentTerm, state, clock, latestRead>>
 
 \*  Node 'i' rolls back against the log of node 'j'.  
@@ -142,7 +148,7 @@ RollbackEntries(i, j) ==
     /\ CanRollback(i, j)
     \* Roll back one log entry.
     /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
-    /\ UNCHANGED <<committed, currentTerm, state, clock, lease, latestRead>>
+    /\ UNCHANGED <<committed, commitIndex, currentTerm, state, clock, lease, latestRead>>
 
 \* Node 'i' gets elected as a Leader.
 BecomeLeader(i, voteQuorum) == 
@@ -155,7 +161,7 @@ BecomeLeader(i, voteQuorum) ==
                     IF s = i THEN Leader
                     ELSE IF s \in voteQuorum THEN Follower \* All voters should revert to Follower state.
                     ELSE state[s]]
-    /\ UNCHANGED <<log, committed, latestRead, lease, clock>>   
+    /\ UNCHANGED <<log, committed, commitIndex, latestRead, lease, clock>>   
             
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
@@ -172,6 +178,7 @@ CommitEntry(i, commitQuorum) ==
         \* Don't mark an entry as committed more than once.
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
+        /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
         /\ latestRead' = entry         
         /\ lease' = [lease EXCEPT ![i] = CreateLease(entry.term, entry.clock+Delta)]
         /\ UNCHANGED <<currentTerm, state, log, clock>>
@@ -183,18 +190,19 @@ CommitEntry(i, commitQuorum) ==
 \* strictly necessary for guaranteeing safety.
 UpdateTerms(i, j) == 
     /\ UpdateTermsExpr(i, j)
-    /\ UNCHANGED <<log, committed, lease, latestRead, clock>>
+    /\ UNCHANGED <<log, committed, commitIndex, lease, latestRead, clock>>
 
 \* Action for incrementing the clock
 Tick == 
     /\ clock' = clock + 1
-    /\ UNCHANGED <<currentTerm, state, log, committed, lease, latestRead>>
+    /\ UNCHANGED <<currentTerm, state, log, committed, commitIndex, lease, latestRead>>
 
 Init == 
     /\ currentTerm = [i \in Server |-> 0]
     /\ state       = [i \in Server |-> Follower]
     /\ log = [i \in Server |-> <<>>]
     /\ committed = {}
+    /\ commitIndex = [i \in Server |-> 0]
     /\ clock = 0
     /\ lease = [i \in Server |-> CreateLease(-1, -1)]  
     /\ latestRead = CreateEntry(0, 0, 0)
