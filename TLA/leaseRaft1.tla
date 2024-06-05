@@ -1,7 +1,6 @@
 ---- MODULE leaseRaft1 ----
-\*
-\* Basic version of LeaseGuard protocol.
-\*
+\* LeaseGuard protocol with inherited lease read & deferred commit writes
+\* This spec uses perfectly synchronized clocks
 
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 
@@ -107,10 +106,9 @@ UpdateTermsExpr(i, j) ==
 \*
 
 \* Node 'i', a Leader, handles a new client request and places the entry 
-\* in its log.    
+\* in its log. Due to deferred commit writes, leader doesn't check lease to accept clientWrite   
 ClientWrite(i, k) ==
     /\ state[i] = Leader
-    /\ (lease[i].expires < clock \/ lease[i].term = currentTerm[i])
     /\ clock' = clock + 1     
     /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], clock', k, Len(log[i]) + 1))]
     /\ UNCHANGED <<currentTerm, state, committed, commitIndex, lease, latestRead>>
@@ -121,7 +119,7 @@ ClientRead(i,k) ==
     /\ state[i] = Leader
 \*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
     /\ lease[i].expires >= clock
-    /\ FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) \* no limbo read allowed
+    /\ currentTerm[i] # lease[i].term => FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) \* limbo-read guarding for inherited lease
     /\ LET cInd == FindLatestKey(k, i, commitIndex[i]) IN
         /\ latestRead' = [latestRead EXCEPT ![k] = 
                             IF cInd = 0 THEN CreateEntry(0, 0, k, 0)
@@ -189,6 +187,8 @@ CommitEntry(i, commitQuorum) ==
         /\ entry.term = currentTerm[i]
         \* all nodes have this log entry and are in the term of the leader.
         /\ ImmediatelyCommitted(entry, commitQuorum)
+        \* If prev leader lease still in session, can't advance commitIndex! (deferred commit write)
+        /\ (lease[i].expires < clock \/ lease[i].term = currentTerm[i])
         \* Don't mark an entry as committed more than once.
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
