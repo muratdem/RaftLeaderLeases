@@ -19,8 +19,15 @@ Alias == [
     log |-> log,
     replicationTimes |-> replicationTimes,
     committed |-> committed,
+    commitIndex |-> commitIndex,
     clock |-> clock,
     latestRead |-> latestRead,
-    whichServersHaveLeases |-> [s \in Server |-> [read |-> HasLease(s, TRUE), write |-> HasLease(s, TRUE)]]
+    whichServersHaveLeases |-> [
+        s \in Server |-> [
+            read |-> CanServeConsistentReads(s),
+            commit |-> CanAdvanceCommitIndex(s)
+        ]
+    ],
+    maxCommitted |-> MaxCommitted(committed)
 ]
 ====

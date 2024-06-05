@@ -14,6 +14,7 @@ VARIABLE state
 VARIABLE log
 VARIABLE replicationTimes
 VARIABLE committed
+VARIABLE commitIndex
 VARIABLE clock
 VARIABLE latestRead
 
@@ -24,6 +25,7 @@ TypeOK ==
     /\ log \in [Server -> Seq(Entry)]
     /\ replicationTimes \in [Server -> Seq(Int)]
     /\ committed \in SUBSET Entry
+    /\ commitIndex \in [Server -> Int]
     /\ clock \in Int
     /\ latestRead \in Entry
 
@@ -36,6 +38,7 @@ vars == <<currentTerm, state, log, replicationTimes, committed, clock, latestRea
 \* Is a sequence empty.
 Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j)
+Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
 CreateEntry(xterm, xindex) == [term |-> xterm, index |-> xindex]
 MaxCommitted(S) == IF Cardinality(S) = 0 THEN CreateEntry(0, 0)
                    ELSE CHOOSE i \in S: (\A j \in S: i.index >= j.index)
@@ -91,22 +94,26 @@ MaxMajorityReplicatedIndex(s) ==
     IN
         IF Cardinality(indexes) > 0 THEN Max(indexes) ELSE 0
 
-\* TRUE if server i has a lease (optionally for committing writes).
-HasLease(i, forCommit) ==
+\* TRUE if server i has a lease for committing writes.
+CanAdvanceCommitIndex(i) ==
     /\ state[i] = Leader
     /\ Len(log[i]) > 0
     /\ LET commit_index_tmp == MaxMajorityReplicatedIndex(i) IN
         /\ commit_index_tmp > 0
-        \* My newest committed entry is newer than lease timeout
-        /\ replicationTimes[i][commit_index_tmp] + Delta > clock
-        \* "Inherited read lease" means we can use a prior term's lease for reads.
-        \* To advance the commit index, we must be sole leaseholder.
-        /\ \/ ~forCommit
-              \* I have committed a log entry.
-           \/ /\ log[i][commit_index_tmp].term = currentTerm[i]
-              \* Last entry committed by prior leader was at least Delta ago.
-              /\ ~(\E index \in DOMAIN log[i] : 
-                  (log[i][index].term # currentTerm[i] /\ (replicationTimes[i][index] + Delta >= clock)))
+        \* My newest majority-replicated entry is newer than lease timeout
+        /\ replicationTimes[i][commit_index_tmp] + Delta >= clock
+        \* I have committed a log entry.
+        /\ log[i][commit_index_tmp].term = currentTerm[i]
+        \* Last entry replicated from prior leader was at least Delta ago.
+        /\ ~(\E index \in DOMAIN log[i] : 
+                (log[i][index].term # currentTerm[i] /\ (replicationTimes[i][index] + Delta >= clock)))
+
+\* TRUE if server i has a (maybe inherited) lease for reads.
+CanServeConsistentReads(i) ==
+    /\ state[i] = Leader
+    /\ Len(replicationTimes[i]) > 0
+    \* My newest majority-replicated entry is newer than lease timeout
+    /\ replicationTimes[i][Len(replicationTimes[i])] + Delta >= clock
 
 --------------------------------------------------------------------------------
 
@@ -122,15 +129,18 @@ ClientWrite(i) ==
     /\ clock' = clock + 1
     /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], Len(log[i]) + 1))]
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock')]
-    /\ UNCHANGED <<currentTerm, state, committed, latestRead>>
+    /\ UNCHANGED <<currentTerm, state, committed, commitIndex, latestRead>>
 
 ClientRead(i) ==
-    /\ HasLease(i, FALSE)
-    /\ LET cInd == MaxCommitted(committed).index
+    /\ CanServeConsistentReads(i)
+    \* The next two lines handle SERVER-53813.
+    /\ commitIndex[i] > 0
+    /\ log[i][MaxMajorityReplicatedIndex(i)].term = currentTerm[i]
+    /\ LET cInd == commitIndex[i]
            l == Len(log[i]) IN
         /\ latestRead' = IF cInd = 0 THEN CreateEntry(0, 0)
                          ELSE log[i][cInd] \* Raft guarantees cInd <= l
-    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, clock>>
+    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, commitIndex, clock>>
 
 \* Node 'i' gets a new log entry from node 'j'.
 GetEntries(i, j) ==
@@ -152,6 +162,10 @@ GetEntries(i, j) ==
               newReplTimes  == Append(replicationTimes[i], clock) IN
               /\ log' = [log EXCEPT ![i] = newLog]
               /\ replicationTimes' = [replicationTimes EXCEPT ![i] = newReplTimes]
+              /\ commitIndex' = [commitIndex EXCEPT ![i] = 
+                  IF commitIndex[i] < commitIndex[j]
+                  THEN Min ({commitIndex[j], Len(newLog)})
+                  ELSE commitIndex[i]]   
     /\ UNCHANGED <<committed, currentTerm, state, clock, latestRead>>
 
 \*  Node 'i' rolls back against the log of node 'j'.
@@ -177,14 +191,14 @@ BecomeLeader(i, voteQuorum) ==
     \* Write a no-op, as required by Raft and to get first lease of the term
     /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(newTerm, Len(log[i]) + 1))]
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock)]
-    /\ UNCHANGED <<committed, latestRead, clock>>
+    /\ UNCHANGED <<committed, commitIndex, latestRead, clock>>
 
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
+    /\ CanAdvanceCommitIndex(i)
     \* Must have some entries to commit.
-    /\ Len(log[i]) > 0
-    /\ HasLease(i, TRUE)
-    /\ LET ind == Len(log[i])
+    /\ commitIndex[i] < Len(log[i]) 
+    /\ LET ind == commitIndex[i]+1
            entry == log[i][ind] IN
         \* The entry was written by this leader.
         /\ entry.term = currentTerm[i]
@@ -193,8 +207,9 @@ CommitEntry(i, commitQuorum) ==
         \* Don't mark an entry as committed more than once.
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
+        /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
         /\ latestRead' = entry
-        /\ UNCHANGED <<currentTerm, state, log, replicationTimes, clock>>
+        /\ UNCHANGED <<currentTerm, replicationTimes, state, log, clock>>
 
 \* Action that exchanges terms between two nodes and step down the Leader if
 \* needed. This can be safely specified as a separate action, rather than
@@ -203,12 +218,12 @@ CommitEntry(i, commitQuorum) ==
 \* strictly necessary for guaranteeing safety.
 UpdateTerms(i, j) ==
     /\ UpdateTermsExpr(i, j)
-    /\ UNCHANGED <<log, replicationTimes, committed, latestRead, clock>>
+    /\ UNCHANGED <<log, replicationTimes, committed, commitIndex, latestRead, clock>>
 
 \* Action for incrementing the clock
 Tick ==
     /\ clock' = clock + 1
-    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, latestRead>>
+    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, commitIndex, latestRead>>
 
 Init ==
     /\ currentTerm = [i \in Server |-> 0]
@@ -216,6 +231,7 @@ Init ==
     /\ log = [i \in Server |-> <<>>]
     /\ replicationTimes = [i \in Server |-> <<>>]
     /\ committed = {}
+    /\ commitIndex = [i \in Server |-> 0]
     /\ clock = 0
     /\ latestRead = CreateEntry(0, 0)
 
@@ -252,9 +268,15 @@ OneLeaderPerTerm ==
          /\ state[t] = Leader
          /\ currentTerm[s] = currentTerm[t]) => (s = t)
 
-OneLeaseHolder ==
+OneCommitLeaseHolder ==
     \A s, t \in Server :
-        (HasLease(s, TRUE) /\ HasLease(t, TRUE)) => (s = t)
+        (CanAdvanceCommitIndex(s) /\ CanAdvanceCommitIndex(t)) => (s = t)
+
+\* If a server can commit, no other server can do linearizable reads.
+ReadLeaseSafety ==
+    \A s, t \in Server :
+        \* s has the right to advance commit index => no other server can read
+        (CanAdvanceCommitIndex(s) /\ s # t) => ~CanServeConsistentReads(t)
 
 LeaderAppendOnly ==
     [][\A s \in Server : state[s] = Leader => Len(log'[s]) >= Len(log[s])]_vars
