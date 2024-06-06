@@ -1,13 +1,14 @@
 ---- MODULE leaseRaftLogBased ----
-\*
-\* MongoDB consensus plus leases, with no separate data structure
+\* LeaseGuard protocol with inherited lease read & deferred commit writes
+\* This spec uses perfectly synchronized clocks
+\* Compared to leaseRaft1.tla, this spec uses no separate data structure
 \* for the lease: the log is the lease.
 \*
 
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 
-CONSTANTS Server
-CONSTANTS Follower, Leader, Nil, Delta
+CONSTANTS Server, Key, Delta
+CONSTANTS Follower, Leader, Nil
 
 VARIABLE currentTerm
 VARIABLE state
@@ -18,7 +19,7 @@ VARIABLE commitIndex
 VARIABLE clock
 VARIABLE latestRead
 
-Entry == [term: Int, clock: Int, index: Int]
+Entry == [term: Int, key: Key, index: Int]
 TypeOK ==
     /\ currentTerm \in [Server -> Int]
     /\ state \in [Server -> {Leader, Follower}]
@@ -27,7 +28,7 @@ TypeOK ==
     /\ committed \in SUBSET Entry
     /\ commitIndex \in [Server -> Int]
     /\ clock \in Int
-    /\ latestRead \in Entry
+    /\ latestRead \in [Key -> Entry]
 
 vars == <<currentTerm, state, log, replicationTimes, committed, clock, latestRead>>
 
@@ -39,13 +40,24 @@ vars == <<currentTerm, state, log, replicationTimes, committed, clock, latestRea
 Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j)
 Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
-CreateEntry(xterm, xindex) == [term |-> xterm, index |-> xindex]
-MaxCommitted(S) == IF Cardinality(S) = 0 THEN CreateEntry(0, 0)
-                   ELSE CHOOSE i \in S: (\A j \in S: i.index >= j.index)
+Range(f) == {f[x]: x \in DOMAIN f}
+CreateEntry(xterm, xkey, xindex) == [term |-> xterm, key |-> xkey, index |-> xindex]
+FilterKey(S,k) == {e \in S: e.key=k}
+MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0 THEN CreateEntry(0, k, 0)
+                      ELSE CHOOSE i \in FilterKey(S,k): (\A j \in FilterKey(S,k): i.index >= j.index)
 
 
 \* Is log entry e in the log of node 'i'.
 InLog(e, i) == log[i][e.index] = e
+
+\* Find latest entry for key in log of i with upper bound u as commitindex
+FindLatestKey(k,i,u) == 
+    IF u=0 THEN 0
+    ELSE 
+        IF ~(\E j \in 1..u: log[i][j].key=k) \* Raft guarantees cInd <= Len(log[i])
+            THEN 0
+            ELSE CHOOSE j \in 1..u: /\ log[i][j].key=k 
+                                    /\ \A l \in 1..u: log[i][l].key=k  => j>=l
 
 \* The term of the last entry in a log, or 0 if the log is empty.
 LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
@@ -94,52 +106,35 @@ MaxMajorityReplicatedIndex(s) ==
     IN
         IF Cardinality(indexes) > 0 THEN Max(indexes) ELSE 0
 
-\* TRUE if server i has a lease for committing writes.
-CanAdvanceCommitIndex(i) ==
-    /\ state[i] = Leader
-    /\ Len(log[i]) > 0
-    /\ LET commit_index_tmp == MaxMajorityReplicatedIndex(i) IN
-        /\ commit_index_tmp > 0
-        \* My newest majority-replicated entry is newer than lease timeout
-        /\ replicationTimes[i][commit_index_tmp] + Delta >= clock
-        \* I have committed a log entry.
-        /\ log[i][commit_index_tmp].term = currentTerm[i]
-        \* Last entry replicated from prior leader was at least Delta ago.
-        /\ ~(\E index \in DOMAIN log[i] : 
-                (log[i][index].term # currentTerm[i] /\ (replicationTimes[i][index] + Delta >= clock)))
-
-\* TRUE if server i has a (maybe inherited) lease for reads.
-CanServeConsistentReads(i) ==
-    /\ state[i] = Leader
-    /\ Len(replicationTimes[i]) > 0
-    \* My newest majority-replicated entry is newer than lease timeout
-    /\ replicationTimes[i][Len(replicationTimes[i])] + Delta >= clock
-
 --------------------------------------------------------------------------------
 
 \*
 \* Next state actions.
 \*
 
-\* Node 'i', a Leader, handles a new client request and places the entry
-\* in its log. Our "deferred-commit write" optimization means any leader
-\* can write, but only a leaseholder can commit.
-ClientWrite(i) ==
+\* Node 'i', a Leader, handles a new client request and places the entry 
+\* in its log. Due to deferred commit writes, leader doesn't check lease to accept clientWrite
+ClientWrite(i, k) ==
     /\ state[i] = Leader
     /\ clock' = clock + 1
-    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], Len(log[i]) + 1))]
+    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], k, Len(log[i]) + 1))]
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock')]
     /\ UNCHANGED <<currentTerm, state, committed, commitIndex, latestRead>>
 
-ClientRead(i) ==
-    /\ CanServeConsistentReads(i)
-    \* The next two lines handle SERVER-53813.
+\* This may only set latestRead to an earlier value than what is committed, 
+\* and that would be caught by LinearizableReads invariant
+ClientRead(i, k) ==
+    /\ state[i] = Leader
+    /\ Len(log[i]) > 0
     /\ commitIndex[i] > 0
-    /\ log[i][MaxMajorityReplicatedIndex(i)].term = currentTerm[i]
-    /\ LET cInd == commitIndex[i]
-           l == Len(log[i]) IN
-        /\ latestRead' = IF cInd = 0 THEN CreateEntry(0, 0)
-                         ELSE log[i][cInd] \* Raft guarantees cInd <= l
+    /\ replicationTimes[i][Len(log[i])] + Delta >= clock
+    \* limbo-read guarding for inherited lease
+    /\ currentTerm[i] # log[i][commitIndex[i]].term =>
+        FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) 
+    /\ LET cInd == FindLatestKey(k, i, commitIndex[i]) IN
+        /\ latestRead' = [latestRead EXCEPT ![k] = 
+                            IF cInd = 0 THEN CreateEntry(0, k, 0)
+                            ELSE log[i][cInd] ] \* Raft guarantees cInd <= Len(log[i])
     /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, commitIndex, clock>>
 
 \* Node 'i' gets a new log entry from node 'j'.
@@ -154,8 +149,6 @@ GetEntries(i, j) ==
                         THEN TRUE
                         ELSE log[j][Len(log[i])] = log[i][Len(log[i])] IN
        /\ logOk \* log consistency check
-       \* If the log of node i is empty, then take the first entry from node j's log.
-       \* Otherwise take the entry following the last index of node i.
        /\ LET newEntryIndex == IF Empty(log[i]) THEN 1 ELSE Len(log[i]) + 1
               newEntry      == log[j][newEntryIndex]
               newLog        == Append(log[i], newEntry)
@@ -175,7 +168,7 @@ RollbackEntries(i, j) ==
     \* Roll back one log entry.
     /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = SubSeq(replicationTimes[i], 1, Len(log[i])-1)]
-    /\ UNCHANGED <<committed, currentTerm, state, clock, latestRead>>
+    /\ UNCHANGED <<committed, commitIndex, currentTerm, state, clock, latestRead>>
 
 \* Node 'i' gets elected as a Leader.
 BecomeLeader(i, voteQuorum) ==
@@ -188,14 +181,15 @@ BecomeLeader(i, voteQuorum) ==
                     IF s = i THEN Leader
                     ELSE IF s \in voteQuorum THEN Follower \* All voters should revert to Follower state.
                     ELSE state[s]]
-    \* Write a no-op, as required by Raft and to get first lease of the term
-    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(newTerm, Len(log[i]) + 1))]
-    /\ replicationTimes' = [replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock)]
-    /\ UNCHANGED <<committed, commitIndex, latestRead, clock>>
+    /\ UNCHANGED <<committed, replicationTimes, log, commitIndex, latestRead, clock>>
 
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
-    /\ CanAdvanceCommitIndex(i)
+    /\ state[i] = Leader
+    /\ Len(log[i]) > 0
+    \* Last entry replicated from prior leader was at least Delta ago.
+    /\ \A index \in DOMAIN log[i] : 
+        log[i][index].term # currentTerm[i] => (replicationTimes[i][index] + Delta < clock)
     \* Must have some entries to commit.
     /\ commitIndex[i] < Len(log[i]) 
     /\ LET ind == commitIndex[i]+1
@@ -208,7 +202,7 @@ CommitEntry(i, commitQuorum) ==
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
         /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
-        /\ latestRead' = entry
+        /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]         
         /\ UNCHANGED <<currentTerm, replicationTimes, state, log, clock>>
 
 \* Action that exchanges terms between two nodes and step down the Leader if
@@ -233,11 +227,11 @@ Init ==
     /\ committed = {}
     /\ commitIndex = [i \in Server |-> 0]
     /\ clock = 0
-    /\ latestRead = CreateEntry(0, 0)
+    /\ latestRead = [k \in Key |-> CreateEntry(0, k, 0)]
 
 Next ==
-    \/ \E s \in Server : ClientWrite(s)
-    \/ \E s \in Server : ClientRead(s)
+    \/ \E s \in Server : \E k \in Key : ClientWrite(s,k)
+    \/ \E s \in Server : \E k \in Key : ClientRead(s,k)
     \/ \E s, t \in Server : GetEntries(s, t)
     \/ \E s, t \in Server : RollbackEntries(s, t)
     \/ \E s \in Server : \E Q \in Quorums(Server) : BecomeLeader(s, Q)
@@ -268,16 +262,6 @@ OneLeaderPerTerm ==
          /\ state[t] = Leader
          /\ currentTerm[s] = currentTerm[t]) => (s = t)
 
-OneCommitLeaseHolder ==
-    \A s, t \in Server :
-        (CanAdvanceCommitIndex(s) /\ CanAdvanceCommitIndex(t)) => (s = t)
-
-\* If a server can commit, no other server can do linearizable reads.
-ReadLeaseSafety ==
-    \A s, t \in Server :
-        \* s has the right to advance commit index => no other server can read
-        (CanAdvanceCommitIndex(s) /\ s # t) => ~CanServeConsistentReads(t)
-
 LeaderAppendOnly ==
     [][\A s \in Server : state[s] = Leader => Len(log'[s]) >= Len(log[s])]_vars
 
@@ -297,9 +281,8 @@ LeaderCompleteness ==
 StateMachineSafety ==
     \A c1, c2 \in committed : (c1.index = c2.index) => (c1 = c2)
 
-\* Linearizability of reads
-LinearizableReads ==
-    latestRead = IF Cardinality(committed) = 0 THEN CreateEntry(0, 0)
-                 ELSE MaxCommitted(committed)
+\* Linearizability of reads, checking equality of latestRead map to the latest committed/acked write values
+LinearizableReads == 
+    latestRead = [ k \in Key |-> MaxCommitted(committed,k) ]
 
 =============================================================================

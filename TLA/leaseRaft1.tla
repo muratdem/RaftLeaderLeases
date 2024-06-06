@@ -23,6 +23,7 @@ TypeOK ==
     /\ state \in [Server -> {Leader, Follower}]
     /\ log \in [Server -> Seq(Entry)]
     /\ committed \in SUBSET Entry
+    /\ commitIndex \in [Server -> Int]
     /\ clock \in Int
     /\ lease \in [Server -> Lease]
     /\ latestRead \in [Key -> Entry]
@@ -105,8 +106,8 @@ UpdateTermsExpr(i, j) ==
 \* Next state actions.
 \*
 
-\* Node 'i', a Leader, handles a new client request and places the entry 
-\* in its log. Due to deferred commit writes, leader doesn't check lease to accept clientWrite   
+\* Node 'i', a Leader, handles a new client request and places the entry
+\* in its log. Due to deferred commit writes, leader doesn't check lease to accept clientWrite
 ClientWrite(i, k) ==
     /\ state[i] = Leader
     /\ clock' = clock + 1     
@@ -115,11 +116,13 @@ ClientWrite(i, k) ==
 
 \* This may only set latestRead to an earlier value than what is committed, 
 \* and that would be caught by LinearizableReads invariant
-ClientRead(i,k) ==
+ClientRead(i, k) ==
     /\ state[i] = Leader
-\*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
+    \*  /\ lease[i].term = currentTerm[i] \* new leader can serve read on old leader's lease!!
     /\ lease[i].expires >= clock
-    /\ currentTerm[i] # lease[i].term => FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) \* limbo-read guarding for inherited lease
+    \* limbo-read guarding for inherited lease
+    /\ currentTerm[i] # lease[i].term =>
+        FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i]))
     /\ LET cInd == FindLatestKey(k, i, commitIndex[i]) IN
         /\ latestRead' = [latestRead EXCEPT ![k] = 
                             IF cInd = 0 THEN CreateEntry(0, 0, k, 0)
@@ -138,9 +141,7 @@ GetEntries(i, j) ==
                         THEN TRUE
                         ELSE log[j][Len(log[i])] = log[i][Len(log[i])] IN
        /\ logOk \* log consistency check
-       \* If the log of node i is empty, then take the first entry from node j's log.
-       \* Otherwise take the entry following the last index of node i.
-       /\ LET newEntryIndex == IF Empty(log[i]) THEN 1 ELSE Len(log[i]) + 1
+       /\ LET newEntryIndex == Len(log[i]) + 1
               newEntry      == log[j][newEntryIndex]
               newLog        == Append(log[i], newEntry) IN
               /\ log' = [log EXCEPT ![i] = newLog]

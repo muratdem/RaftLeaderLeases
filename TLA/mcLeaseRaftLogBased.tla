@@ -22,12 +22,9 @@ Alias == [
     commitIndex |-> commitIndex,
     clock |-> clock,
     latestRead |-> latestRead,
-    whichServersHaveLeases |-> [
-        s \in Server |-> [
-            read |-> CanServeConsistentReads(s),
-            commit |-> CanAdvanceCommitIndex(s)
-        ]
-    ],
-    maxCommitted |-> MaxCommitted(committed)
+    maxTerm |-> Max(Range(currentTerm)),
+    maxMajorityReplicated |-> [
+        s \in Server |-> MaxMajorityReplicatedIndex(s)
+    ]
 ]
 ====
