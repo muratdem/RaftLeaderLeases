@@ -164,7 +164,7 @@ class LeaseRaftTest(SimulatorTestCase):
         # Lease timeout > election timeout, so we have a stale leaseholder.
         await self.replica_set_setup(lease_enabled=True,
                                      election_timeout=1000,
-                                     lease_timeout=2000)
+                                     lease_timeout=20000)
         primary_A = await self.get_primary()
         # Make sure primary A has commit index > -1.
         await primary_A.write(key=0, value=0)
