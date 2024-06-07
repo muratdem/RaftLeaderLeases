@@ -127,7 +127,7 @@ ClientRead(i, k) ==
     /\ state[i] = Leader
     /\ Len(log[i]) > 0
     /\ commitIndex[i] > 0
-    /\ replicationTimes[i][Len(log[i])] + Delta >= clock
+    /\ replicationTimes[i][commitIndex[i]] + Delta >= clock
     \* limbo-read guarding for inherited lease
     /\ currentTerm[i] # log[i][commitIndex[i]].term =>
         FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) 
