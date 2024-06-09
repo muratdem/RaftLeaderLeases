@@ -1,3 +1,4 @@
+import copy
 import inspect
 import logging
 import unittest
@@ -49,29 +50,31 @@ async def await_predicate(predicate):
         await sleep(1)
 
 
+TEST_CFG = DictConfig({
+    "max_clock_error": 0.1,
+    "election_timeout": 1000,
+    "one_way_latency_mean": 125,
+    "one_way_latency_variance": 100,
+    "noop_rate": 1000,
+    "heartbeat_rate": 500,
+    "operations": 50,
+    "interarrival": 50,
+    "stepdown_rate": 50000,
+    "partition_rate": 500,
+    "heal_rate": 1000,
+    "keyspace_size": 1,
+    "lease_enabled": False,
+    "inherit_lease_enabled": True,
+    "defer_commit_enabled": True,
+    "log_write_micros": None,
+    "lease_timeout": 1000,
+    "seed": 1,
+})
+
+
 class LeaseRaftTest(SimulatorTestCase):
     async def replica_set_setup(self, **kwargs) -> None:
-        self.cfg = DictConfig({
-            "max_clock_error": 0.1,
-            "election_timeout": 1000,
-            "one_way_latency_mean": 125,
-            "one_way_latency_variance": 100,
-            "noop_rate": 1000,
-            "heartbeat_rate": 500,
-            "operations": 50,
-            "interarrival": 50,
-            "stepdown_rate": 50000,
-            "partition_rate": 500,
-            "heal_rate": 1000,
-            "keyspace_size": 1,
-            "lease_enabled": False,
-            "inherit_lease_enabled": True,
-            "defer_commit_enabled": True,
-            "log_write_micros": None,
-            "lease_timeout": 1000,
-            "seed": 1,
-        })
-
+        self.cfg = copy.deepcopy(TEST_CFG)
         self.cfg.update(kwargs)
         self.prng = PRNG(cfg=self.cfg)
         self.network = Network(prng=self.prng, node_ids=[1, 2, 3])
@@ -85,6 +88,9 @@ class LeaseRaftTest(SimulatorTestCase):
         for n in self.nodes.values():
             n.initiate(self.nodes)
 
+        # Kickstart. If by bad luck we have multiple candidates it messes with tests.
+        self.nodes[1].become_candidate()
+
     async def get_primary(self, nodes: set[Node] | None = None) -> Node:
         if nodes is None:
             nodes = set(self.nodes.values())
@@ -93,10 +99,10 @@ class LeaseRaftTest(SimulatorTestCase):
             lambda: next((n for n in nodes if n.role == Role.PRIMARY), None))
 
     async def read_from_stale_primary(self,
-                                      lease_enabled: bool,
                                       concern: ReadConcern,
-                                      expected_result: list[int]) -> None:
-        await self.replica_set_setup(lease_enabled=lease_enabled)
+                                      expected_result: list[int],
+                                      **kwargs) -> None:
+        await self.replica_set_setup(**kwargs)
         primary_A = await self.get_primary()
         # Make sure primary A has commit index > -1.
         await primary_A.write(key=0, value=0)
@@ -127,7 +133,7 @@ class LeaseRaftTest(SimulatorTestCase):
                                            expected_result=[],
                                            lease_enabled=False)
 
-    async def test_read_concern_linearizable_upholds_read_your_writes(self):
+    async def test_rc_linearizable_is_linearizable_with_lease(self):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.LINEARIZABLE,
                                                expected_result=[1],
@@ -139,26 +145,24 @@ class LeaseRaftTest(SimulatorTestCase):
                                                expected_result=[1],
                                                lease_enabled=True)
 
-    async def await_lease(self, defer_commit_enabled: bool):
-        await self.replica_set_setup(
-            lease_enabled=True,
-            defer_commit_enabled=defer_commit_enabled,
-            noop_rate=1e10)
+    async def test_has_lease(self):
+        await self.replica_set_setup(lease_enabled=True, noop_rate=1e10)
+        # The primary writes a no-op when it's elected, but that isn't committed yet.
         primary = await self.get_primary()
-        self.assertFalse(primary.has_lease(for_writes=True))
+        self.assertEqual(primary.commit_index, -1)
+        # Has read lease if last committed entry is newer than lease timeout.
         self.assertFalse(primary.has_lease(for_writes=False))
-        # The primary buffers this write until it has acquired a lease.
-        await primary.write(1, 1)
+        # Has write lease if no entry from prior term is newer than lease timeout.
         self.assertTrue(primary.has_lease(for_writes=True))
+        # Wait for the no-op to be committed.
+        await await_predicate(lambda: primary.commit_index > -1)
         self.assertTrue(primary.has_lease(for_writes=False))
-        reply = await primary.read(1, concern=ReadConcern.MAJORITY)
-        self.assertEqual([1], reply.value)
-
-    async def test_await_lease_with_defer_commit(self):
-        await self.await_lease(defer_commit_enabled=True)
-
-    async def test_await_lease_without_defer_commit(self):
-        await self.await_lease(defer_commit_enabled=False)
+        self.assertTrue(primary.has_lease(for_writes=True))
+        await sleep(int(self.cfg.lease_timeout * (1 + primary.clock.max_clock_error)))
+        # Can't read: last committed entry is older than lease timeout.
+        self.assertFalse(primary.has_lease(for_writes=False))
+        # Still has write lease: there are no entries from prior term.
+        self.assertTrue(primary.has_lease(for_writes=True))
 
     async def test_read_with_prior_leader_lease(self):
         # Lease timeout > election timeout, so we have a stale leaseholder.
@@ -194,6 +198,27 @@ class LeaseRaftTest(SimulatorTestCase):
 
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await primary_A.read(key=1, concern=ReadConcern.MAJORITY)
+
+    async def test_advance_commit_index(self):
+        await self.replica_set_setup(lease_enabled=True,
+                                     lease_timeout=10 * TEST_CFG.election_timeout,
+                                     noop_rate=1e10)
+        primary_A = await self.get_primary()
+        await primary_A.write(key=1, value=1)
+        commit_index = primary_A.commit_index
+        await await_predicate(
+            lambda: all(n.log == primary_A.log for n in self.nodes.values()))
+        secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
+        self.network.make_partition(
+            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        primary_B = await self.get_primary(secondaries)
+        self.assertIsNot(primary_A, primary_B)
+        # New primary waits for prior term's entries to be > lease timeout old.
+        self.assertFalse(primary_B.has_lease(for_writes=True))
+        self.assertLessEqual(primary_B.commit_index, commit_index)
+        await sleep(int(self.cfg.lease_timeout * (1 + primary_A.clock.max_clock_error)))
+        self.assertGreater(primary_B.commit_index, commit_index)
+        self.assertTrue(primary_B.has_lease(for_writes=True))
 
     async def test_rollback(self):
         # Nothing to do with leases, just make sure rollback logic works.

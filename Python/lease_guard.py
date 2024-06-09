@@ -457,6 +457,7 @@ class Node:
         # A secondary can learn of a commit index higher than it has replicated.
         start_i = min(len(self.log) - 1, self.commit_index)
         # Reverse-iter, mark when entries became visible to rc:majority on this node.
+        # This info is used to check linearizability.
         for i in range(start_i, -1, -1):
             if self.log[i].committed_at_absolute_ts is not None:
                 # This entry and all prior have been marked.
@@ -508,38 +509,30 @@ class Node:
         self._update_commit_index(index)
 
     def has_lease(self, for_writes: bool) -> bool:
-        """Decide if I can read or write."""
-        # With defer_commit_enabled, I can't advance the commit index without
-        # a lease. But I have to advance the commit index to get a lease! So, locally
-        # calculate the commit index from nodes' known positions. If I've heard of a
-        # higher commit index while I was a secondary, then use that instead.
-        commit_index_tmp = max(
-            self.commit_index, statistics.median(self.match_index.values()))
-
-        if self.role is not Role.PRIMARY or len(self.log) == 0 or commit_index_tmp < 0:
+        """Decide if I can read or write / commit with defer_commit_enabled."""
+        if self.role is not Role.PRIMARY:
             return False
 
         lease_timeout_with_slop = self.lease_timeout * (1 + self.clock.max_clock_error)
         lease_start = self.clock.now() - lease_timeout_with_slop
-        committed = self.log[:commit_index_tmp + 1]
-        if committed[-1].local_ts <= lease_start:
-            # My newest committed entry is before lease timeout, same for older entries.
-            return False
-
-        # "Inherited read lease" means this primary can serve reads before it gets a
-        # lease, while a prior primary's lease is valid.
-        if for_writes or not self.inherit_lease_enabled:
-            if committed[-1].term != self.current_term:
-                # I haven't committed an entry yet. This check fixes SERVER-53813.
-                return False
-
-            # Wait for past leader's lease to expire. (My last committed entry could
-            # be a no-op, which I wrote without a lease.)
+        if for_writes:
+            # Wait for past leader's lease to expire.
             prior_entry = next(
-                (e for e in reversed(committed) if e.term != self.current_term), None)
+                (e for e in reversed(self.log) if e.term != self.current_term), None)
 
             if prior_entry and prior_entry.local_ts >= lease_start:
                 # Previous leader still has write lease.
+                return False
+        else:
+            if len(self.log) == 0 or self.commit_index == -1:
+                return False
+
+            # A secondary can know a commit index past its newest replicated entry.
+            commit_index = min(self.commit_index, len(self.log) - 1)
+            # "Inherited read lease" means this primary can serve reads before it gets a
+            # lease, while a prior primary's lease is valid.
+            if self.log[commit_index].local_ts <= lease_start:
+                # My newest committed entry is before lease timeout.
                 return False
 
         return True
@@ -634,7 +627,7 @@ class Node:
     def _reset_election_deadline(self):
         self.election_deadline = (
             self.clock.now() + self.election_timeout
-            + self.prng.randint(0, self.prng._one_way_latency_mean * 2))
+            + self.prng.randint(0, self.prng._one_way_latency_mean * 2 * self.node_id))
 
     def __str__(self) -> str:
         return f"Node {self.node_id} {self.role.name}"
