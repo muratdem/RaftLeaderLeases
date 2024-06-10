@@ -170,8 +170,11 @@ class LeaseRaftTest(SimulatorTestCase):
                                      election_timeout=1000,
                                      lease_timeout=20000)
         primary_A = await self.get_primary()
-        # Make sure primary A has commit index > -1.
+        # Make sure all nodes have commit_index > -1.
         await primary_A.write(key=0, value=0)
+        await await_predicate(lambda: all(n.commit_index == primary_A.commit_index
+                                          for n in self.nodes.values()))
+
         self.assertTrue(primary_A.has_lease(for_writes=True))
         self.assertTrue(primary_A.has_lease(for_writes=False))
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
@@ -243,6 +246,38 @@ class LeaseRaftTest(SimulatorTestCase):
             await write_task
 
         await await_predicate(lambda: primary_A.log == primary_B.log)
+
+    async def test_inherited_lease_read_is_linearizable(self):
+        await self.replica_set_setup(
+            lease_enabled=True,
+            inherit_lease_enabled=True,
+            defer_commit_enabled=False,  # simplifies test
+            lease_timeout=10 * TEST_CFG.election_timeout,
+            noop_rate=1e10)
+        primary_A = await self.get_primary()
+        # All nodes learn this write is committed.
+        await primary_A.write(key=0, value=0)
+        await await_predicate(lambda: all(n.commit_index == primary_A.commit_index
+                                          for n in self.nodes.values()))
+        # Only primary_A learns this write is committed.
+        await primary_A.write(key=0, value=1)
+        secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
+        self.network.make_partition(
+            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        # Promote a secondary that hasn't learned the new commit index.
+        primary_B = min(secondaries, key=lambda n: n.commit_index)
+        self.assertLess(primary_B.commit_index, primary_A.commit_index)
+        primary_B.become_candidate()
+        await await_predicate(lambda: primary_B.role == Role.PRIMARY)
+        # primary_B has primary_A's write.
+        self.assertEqual(
+            [0, 1],
+            (await primary_B.read(key=0, concern=ReadConcern.LOCAL)).value)
+        # But alas, primary_B hasn't advanced its commit index: stale read.
+        self.assertLess(primary_B.commit_index, primary_A.commit_index)
+        self.assertEqual(
+            [0, 1],
+            (await primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE)).value)
 
 
 class LinearizabilityTest(unittest.TestCase):

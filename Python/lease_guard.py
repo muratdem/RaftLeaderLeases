@@ -91,8 +91,11 @@ class Network:
         if self.reachable(from_id, to_id):
             s = ", ".join([a for a in args] + [f"{k}={v}" for k, v in kwargs.items()])
             _logger.debug(f"{from_id} -> {to_id}: {method.__name__}({s})")
-            get_event_loop().call_later(self.prng.one_way_latency_value(),
-                                        method,
+            # After a network delay, check again for partition then deliver the message.
+            get_event_loop().call_later(delay=self.prng.one_way_latency_value(),
+                                        callback=self._deliver,
+                                        from_id=from_id,
+                                        method=method,
                                         *args,
                                         **kwargs)
         else:
@@ -120,6 +123,11 @@ class Network:
     def reachable(self, from_id: int, to_id: int):
         return ((from_id in self.left_partition and to_id in self.left_partition)
                 or (from_id in self.right_partition and to_id in self.right_partition))
+
+    def _deliver(self, from_id: int, method: Callable, *args, **kwargs) -> None:
+        to_id = method.__self__.node_id
+        if self.reachable(from_id, to_id):
+            get_event_loop().call_soon(callback=method, *args, **kwargs)
 
 
 class _Monitor:
