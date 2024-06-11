@@ -604,6 +604,14 @@ class Node:
             and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
 
+        if (concern is ReadConcern.LINEARIZABLE
+            and self.lease_enabled
+            and self.inherit_lease_enabled):
+            # Limbo-read guard for inherited lease.
+            while (self._find_latest_key(key, self.commit_index)
+                   != self._find_latest_key(key, len(self.log) - 1)):
+                await sleep(_BUSY_WAIT)
+
         # MAJORITY and LINEARIZABLE read at the majority-commit index.
         log = (self.log if concern is ReadConcern.LOCAL
                else self.log[:self.commit_index + 1])
@@ -617,6 +625,14 @@ class Node:
 
         return ReadReply(execution_ts=execution_ts,
                          value=[e.value for e in log if e.key == key])
+
+    def _find_latest_key(self, key: int, max_index: int) -> int:
+        """Index of last entry that wrote to key, or -1."""
+        for i in reversed(range(max_index + 1)):
+            if self.log[i].key == key:
+                return i
+
+        return -1
 
     def _maybe_stepdown(self, term: int) -> bool:
         if term > self.current_term:
