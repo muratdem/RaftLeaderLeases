@@ -539,7 +539,7 @@ class Node:
             commit_index = min(self.commit_index, len(self.log) - 1)
             # "Inherited read lease" means this primary can serve reads before it gets a
             # lease, while a prior primary's lease is valid.
-            if self.log[commit_index].local_ts <= lease_start:
+            if self.log[commit_index].local_ts < lease_start:
                 # My newest committed entry is before lease timeout.
                 return False
 
