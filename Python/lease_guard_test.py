@@ -269,15 +269,17 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertLess(primary_B.commit_index, primary_A.commit_index)
         primary_B.become_candidate()
         await await_predicate(lambda: primary_B.role == Role.PRIMARY)
-        # primary_B has primary_A's write.
+        # primary_B has primary_A's write, visible with read concern "local".
         self.assertEqual(
             [0, 1],
             (await primary_B.read(key=0, concern=ReadConcern.LOCAL)).value)
-        # But alas, primary_B hasn't advanced its commit index: stale read.
+        # This read is in the "limbo" zone between primary_B's commit index and its
+        # newest log entry. It waits for its commit index to catch up before reading.
         self.assertLess(primary_B.commit_index, primary_A.commit_index)
         self.assertEqual(
             [0, 1],
             (await primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE)).value)
+        self.assertGreater(primary_B.commit_index, primary_A.commit_index)
 
 
 class LinearizabilityTest(unittest.TestCase):
