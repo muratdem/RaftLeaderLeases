@@ -312,7 +312,7 @@ class LinearizabilityTest(unittest.TestCase):
                     key=1,
                     value=[2, 1],  # Wrong, should be [1, 2].
                     success=True
-                )])
+                )], debug=False)
 
     def test_simultaneous_events(self):
         event_1 = ClientLogEntry(
@@ -343,9 +343,42 @@ class LinearizabilityTest(unittest.TestCase):
             success=True
         )
         log = [event_1, event_2, read_event]
-        do_linearizability_check(log)  # History is valid if event_1 was first.
+        # History is valid if event_1 was first.
+        do_linearizability_check(log, debug=False)
         read_event.value = [2, 1]  # The value if event_2 happened first.
-        do_linearizability_check(log)  # History is valid if event_2 was first.
+        # History is valid if event_2 was first.
+        do_linearizability_check(log, debug=False)
+
+    def test_failed_write(self):
+        failed_write = ClientLogEntry(
+            op_type=ClientLogEntry.OpType.ListAppend,
+            start_ts=1,
+            execution_ts=2,
+            end_ts=2,
+            key=1,
+            value=1,
+            success=False
+        )
+        read_1 = ClientLogEntry(
+            op_type=ClientLogEntry.OpType.Read,
+            start_ts=3,
+            execution_ts=4,
+            end_ts=4,
+            key=1,
+            value=[],  # Doesn't see failed write.
+            success=True
+        )
+        read_2 = ClientLogEntry(
+            op_type=ClientLogEntry.OpType.Read,
+            start_ts=5,
+            execution_ts=6,
+            end_ts=6,
+            key=1,
+            value=[1],  # Sees failed write.
+            success=True
+        )
+        log = [failed_write, read_1, read_2]
+        do_linearizability_check(log, debug=False)
 
 
 if __name__ == '__main__':
