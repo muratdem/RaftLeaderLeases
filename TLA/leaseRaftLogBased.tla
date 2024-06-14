@@ -50,14 +50,26 @@ MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0 THEN CreateEntry(0, k, 
 \* Is log entry e in the log of node 'i'.
 InLog(e, i) == log[i][e.index] = e
 
-\* Find latest entry for key in log of i with upper bound u as commitindex
-FindLatestKey(k,i,u) == 
-    IF u=0 THEN 0
+\* Find latest committed entry for key in log of i
+LastCommitted(k, i) == 
+    IF commitIndex[i] = 0 THEN 0
     ELSE 
-        IF ~(\E j \in 1..u: log[i][j].key=k) \* Raft guarantees cInd <= Len(log[i])
+        \* Raft guarantees commitIndex[i] <= Len(log[i])
+        IF ~(\E j \in 1..commitIndex[i]: log[i][j].key=k)
             THEN 0
-            ELSE CHOOSE j \in 1..u: /\ log[i][j].key=k 
-                                    /\ \A l \in 1..u: log[i][l].key=k  => j>=l
+            ELSE CHOOSE j \in 1..commitIndex[i]:
+                /\ log[i][j].key=k 
+                /\ \A l \in 1..commitIndex[i]: log[i][l].key=k => j>=l
+
+\* Find latest entry for key in log of i before i's current term
+LastInPriorTerm(k, i) == 
+    IF ~(\E j \in 1..Len(log[i]): log[i][j].term<currentTerm[i] /\ log[i][j].key=k)
+    THEN 0
+    ELSE CHOOSE j \in 1..Len(log[i]):
+        /\ log[i][j].key=k
+        /\ log[i][j].term<currentTerm[i]
+        /\ \A l \in 1..Len(log[i]):
+            (log[i][l].key=k /\ log[i][l].term<currentTerm[i]) => j>=l
 
 \* The term of the last entry in a log, or 0 if the log is empty.
 LastTerm(xlog) == IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
@@ -130,8 +142,8 @@ ClientRead(i, k) ==
     /\ replicationTimes[i][commitIndex[i]] + Delta >= clock
     \* limbo-read guarding for inherited lease
     /\ currentTerm[i] # log[i][commitIndex[i]].term =>
-        FindLatestKey(k, i, commitIndex[i]) = FindLatestKey(k, i, Len(log[i])) 
-    /\ LET cInd == FindLatestKey(k, i, commitIndex[i]) IN
+        LastCommitted(k, i) = LastInPriorTerm(k, i)
+    /\ LET cInd == LastCommitted(k, i) IN
         /\ latestRead' = [latestRead EXCEPT ![k] = 
                             IF cInd = 0 THEN CreateEntry(0, k, 0)
                             ELSE log[i][cInd] ] \* Raft guarantees cInd <= Len(log[i])
