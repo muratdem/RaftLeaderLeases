@@ -28,7 +28,7 @@ class Future:
         callbacks = self.callbacks
         self.callbacks = []  # Prevent recursive resolves.
         for c in callbacks:
-            c(result, None)
+            self.loop.call_soon(c, result, None)
 
     def set_exception(self, exception: Exception) -> None:
         self.resolved = True
@@ -36,7 +36,7 @@ class Future:
         callbacks = self.callbacks
         self.callbacks = []  # Prevent recursive resolves.
         for c in callbacks:
-            c(None, exception)
+            self.loop.call_soon(c, None, exception)
 
     def ignore_future(self) -> None:
         """To suppress 'coroutine is not awaited' static analysis warning."""
@@ -45,7 +45,8 @@ class Future:
     def __iter__(self):
         yield self
 
-    __await__ = __iter__
+    def __await__(self):
+        return (yield self)
 
     def __del__(self):
         if self.exception:

@@ -14,6 +14,15 @@ class PRNG:
         self._one_way_latency_mean = cfg.one_way_latency_mean
         self._one_way_latency_variance = cfg.one_way_latency_variance
         self._keyspace_size = cfg.keyspace_size
+        self._zipf_skewness = cfg.zipf_skewness
+
+        # Generate Zipfian distribution ranks
+        ranks = np.arange(1, self._keyspace_size + 1)
+        log_probabilities = -self._zipf_skewness * np.log(ranks)
+        probabilities = np.exp(log_probabilities)
+        probabilities /= probabilities.sum()  # Normalize so probabilities sum to 1.
+        self._zipf_probabilities = probabilities
+        self._keys = np.arange(1, self._keyspace_size + 1)
 
     def randint(self, low_inclusive: int, high_inclusive: int) -> int:
         # NumPy's rand_int excludes the high value, make it inclusive.
@@ -35,7 +44,7 @@ class PRNG:
         return int(self._random_state.lognormal(mu, sigma))
 
     def random_key(self) -> int:
-        return self._random_state.randint(0, self._keyspace_size)
+        return self._random_state.choice(self._keys, p=self._zipf_probabilities)
 
 
 @lru_cache

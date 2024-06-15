@@ -38,7 +38,7 @@ def main():
     # Same params as unavailability_experiment.py.
     raw_params.update({
         "operations": 10 * 1000,
-        "keyspace_size": 10 * 1000,
+        "keyspace_size": 1000,
         "interarrival": 300,
         "log_write_micros": 250,  # SSD I/O latency.
         "check_linearizability": False,  # For speed / avoid recursion limit error.

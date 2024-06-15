@@ -36,9 +36,10 @@ PARAMS.update({
     "interarrival": 300,
     # SSD I/O latency.
     "log_write_micros": 250,
-    # No effect on performance stats, but keeps lists from growing too long.
-    "keyspace_size": NUM_OPERATIONS,
+    "keyspace_size": 1000,
+    "zipf_skewness": 1.5,
     "seed": 1,
+    "max_clock_error": 0,  # Less variation between sub-experiments.
 })
 
 SUB_EXPERIMENT_PARAMS = []
@@ -56,6 +57,12 @@ for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
         "title": title,
     })
     SUB_EXPERIMENT_PARAMS.append(sub_exp_params)
+
+
+def get_primary(nodes: dict[int, Node]) -> Node:
+    primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
+    assert len(primaries) == 1
+    return primaries[0]
 
 
 async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
@@ -79,9 +86,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
     async def stepdown_nemesis():
         """After a while, step down the primary."""
         await sleep(params.stepdown_time)
-        primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
-        assert len(primaries) == 1
-        primary = primaries[0]
+        primary = get_primary(nodes)
         _logger.info(f"Nemesis stepping down {primary}")
         # After election timeout, the same or a different node will step up.
         primary.stepdown()
@@ -89,8 +94,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
     async def stepup_task():
         """After a while, manually step up a node."""
         await sleep(params.stepup_time)
-        primaries = [n for n in nodes.values() if n.role is Role.PRIMARY]
-        assert len(primaries) == 0
+        assert not any(n for n in nodes.values() if n.role is Role.PRIMARY)
         secondary = nodes[2]
         _logger.info(f"Nemesis stepping up {secondary}")
         # After election timeout, the same or a different node will step up.
@@ -118,8 +122,8 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
                 prng=prng,
             )))
         else:
-            tasks.append(lp.create_task(name=f"reader {i + 1}", coro=reader(
-                client_id=i + 1,
+            tasks.append(lp.create_task(name=f"reader {i}", coro=reader(
+                client_id=i,
                 start_ts=start_ts + jitter,
                 nodes=list(nodes.values()),
                 client_log=client_log,
@@ -132,6 +136,10 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
         await t
 
     _logger.info(f"Finished after {get_current_ts()} ms (simulated)")
+    primary = get_primary(nodes)
+    _logger.info(f"{primary.metrics.total('limbo_reads')}"
+                 f"/{primary.metrics.sample_count('limbo_reads')}"
+                 f" reads were limbo reads from {primary}")
     return client_log
 
 

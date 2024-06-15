@@ -167,9 +167,12 @@ class _NodeClock:
     def now(self) -> int:
         now = get_current_ts()
         true_span = now - self.previous_true_ts
-        next_ts = self.prng.uniform(
-            self.previous_ts + true_span * (1 - self.max_clock_error),
-            self.previous_ts + true_span * (1 + self.max_clock_error))
+        if self.max_clock_error > 0:
+            next_ts = self.prng.uniform(
+                self.previous_ts + true_span * (1 - self.max_clock_error),
+                self.previous_ts + true_span * (1 + self.max_clock_error))
+        else:
+            next_ts = get_current_ts()
         self.previous_ts = next_ts
         self.previous_true_ts = now
         return int(next_ts)
@@ -215,9 +218,7 @@ class Node:
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
         get_event_loop().create_task("heartbeat", self.heartbeat())
-        if self.lease_enabled and self.defer_commit_enabled:
-            get_event_loop().create_task(
-                "commit index", self.commit_index_updater())
+        get_event_loop().create_task("commit index", self.commit_index_updater())
 
     async def noop_writer(self):
         """Write a periodic noop. Ensures lease extension for readonly workloads.
@@ -358,8 +359,6 @@ class Node:
         can't advance the commit point. Since the primary acquires a lease purely due to
         time passing, we need an eternal task to check if we can advance commit index.
         """
-        assert self.lease_enabled
-        assert self.defer_commit_enabled
         while True:
             if self.has_lease(for_writes=True):
                 self._primary_update_commit_index()
@@ -456,6 +455,13 @@ class Node:
             if len(self.votes_received[term]) > len(self.nodes) / 2:
                 self.role = Role.PRIMARY
                 logging.info(f"{self} elected in term {self.current_term}")
+                if self.inherit_lease_enabled:
+                    assert not self.log or self.log[-1].term < term
+                    logging.debug(
+                        f"Limbo region {self.commit_index} to {len(self.log) - 1}")
+                    if self.commit_index > -1:
+                        for e in self.log[self.commit_index:]:
+                            logging.debug(f"{e}")
                 # Write a noop.
                 self._write_internal(_NOOP, _NOOP)
 
@@ -517,13 +523,13 @@ class Node:
         self._update_commit_index(index)
 
     def has_lease(self, for_writes: bool) -> bool:
-        """Decide if I can read or write / commit with defer_commit_enabled."""
+        """Decide if I can read, or write (or commit with defer_commit_enabled)."""
         if self.role is not Role.PRIMARY:
             return False
 
         lease_timeout_with_slop = self.lease_timeout * (1 + self.clock.max_clock_error)
         lease_start = self.clock.now() - lease_timeout_with_slop
-        if for_writes:
+        if for_writes or not self.inherit_lease_enabled:
             # Wait for past leader's lease to expire.
             prior_entry = next(
                 (e for e in reversed(self.log) if e.term != self.current_term), None)
@@ -532,14 +538,14 @@ class Node:
                 # Previous leader still has write lease.
                 return False
         else:
-            if len(self.log) == 0 or self.commit_index == -1:
+            if self.commit_index == -1:
                 return False
 
-            # A secondary can know a commit index past its newest replicated entry.
-            commit_index = min(self.commit_index, len(self.log) - 1)
+            # Raft guarantees this, but not MongoDB. We follow Raft in this case.
+            assert self.commit_index < len(self.log)
             # "Inherited read lease" means this primary can serve reads before it gets a
             # lease, while a prior primary's lease is valid.
-            if self.log[commit_index].local_ts < lease_start:
+            if self.log[self.commit_index].local_ts < lease_start:
                 # My newest committed entry is before lease timeout.
                 return False
 
@@ -604,13 +610,26 @@ class Node:
             and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
 
+        awaited_limbo_read = 0
         if (concern is ReadConcern.LINEARIZABLE
             and self.lease_enabled
             and self.inherit_lease_enabled):
             # Limbo-read guard for inherited lease.
-            while (self._find_latest_key(key, self.commit_index)
-                   != self._find_latest_key(key, len(self.log) - 1)):
+            while True:
+                if self.log[self.commit_index].term == self.current_term:
+                    # No other leader can commit, so I can read.
+                    break
+                if self._last_committed(key) == self._last_in_prior_term(key):
+                    # My committed data for this key is guaranteed fresh.
+                    break
+                if awaited_limbo_read == 0:
+                    _logger.info(f"Limbo read for key {key}")
+                awaited_limbo_read = 1
                 await sleep(_BUSY_WAIT)
+                if self.role is not Role.PRIMARY:
+                    raise Exception("Stepped down while awaiting limbo read")
+
+        self.metrics.update("limbo_reads", awaited_limbo_read)
 
         # MAJORITY and LINEARIZABLE read at the majority-commit index.
         log = (self.log if concern is ReadConcern.LOCAL
@@ -626,10 +645,18 @@ class Node:
         return ReadReply(execution_ts=execution_ts,
                          value=[e.value for e in log if e.key == key])
 
-    def _find_latest_key(self, key: int, max_index: int) -> int:
-        """Index of last entry that wrote to key, or -1."""
-        for i in reversed(range(max_index + 1)):
+    def _last_committed(self, key: int) -> int:
+        """Index of last committed entry that wrote to key, or -1."""
+        for i in reversed(range(self.commit_index + 1)):
             if self.log[i].key == key:
+                return i
+
+        return -1
+
+    def _last_in_prior_term(self, key: int) -> int:
+        """Index of last entry that wrote to key in prior term, or -1."""
+        for i in reversed(range(len(self.log))):
+            if self.log[i].term < self.current_term and self.log[i].key == key:
                 return i
 
         return -1

@@ -91,8 +91,8 @@ def chart_unavailability():
         return resampled[["reads", "writes"]].iloc[1:-1]
 
     dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
-    # Use max read throughput as y limit. Max write throughput could be very high.
-    y_lim = 2 * max(df["reads"].max() for df in dfs)
+    # Max read and write throughput spike in the final case, so use the middle case.
+    y_lim = 1.5 * dfs[2]["writes"].max()
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, df in enumerate(dfs):

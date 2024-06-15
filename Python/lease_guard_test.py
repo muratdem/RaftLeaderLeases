@@ -63,6 +63,7 @@ TEST_CFG = DictConfig({
     "partition_rate": 500,
     "heal_rate": 1000,
     "keyspace_size": 1,
+    "zipf_skewness": 4,
     "lease_enabled": False,
     "inherit_lease_enabled": True,
     "defer_commit_enabled": True,
@@ -146,7 +147,9 @@ class LeaseRaftTest(SimulatorTestCase):
                                                lease_enabled=True)
 
     async def test_has_lease(self):
-        await self.replica_set_setup(lease_enabled=True, noop_rate=1e10)
+        await self.replica_set_setup(lease_enabled=True,
+                                     inherit_lease_enabled=True,
+                                     noop_rate=1e10)
         # The primary writes a no-op when it's elected, but that isn't committed yet.
         primary = await self.get_primary()
         self.assertEqual(primary.commit_index, -1)
@@ -202,6 +205,72 @@ class LeaseRaftTest(SimulatorTestCase):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await primary_A.read(key=1, concern=ReadConcern.MAJORITY)
 
+    async def test_limbo_read(self):
+        # Key 0, value 0 is appended on primary A and all nodes learn it's committed.
+        #
+        # Key 0, value 1 is appended on A and replicated to all nodes, but only A
+        # learns it's committed before A is partitioned. Test that node B prevents
+        # reading key 0 until B is sure it's committed. During the limbo period, write
+        # to key 0 on B. This is blocked until the limbo ends.
+        #
+        # Key 1, value 0 is appended on A and all nodes learn it's committed. Test that
+        # B can read key 1 using inherited lease.
+        #
+        # Key 2 is written to B before B gets a write lease. Test that key 2 can be
+        # read on B before it's written, or after B gets a write lease, but not between.
+
+        async def read(node: Node, key: int) -> list[int]:
+            reply = await node.read(key=key, concern=ReadConcern.LINEARIZABLE)
+            return reply.value
+
+        # Lease timeout > election timeout, so we have a stale leaseholder.
+        await self.replica_set_setup(lease_enabled=True,
+                                     inherit_lease_enabled=True,
+                                     defer_commit_enabled=True,
+                                     election_timeout=1000,
+                                     lease_timeout=20000)
+        primary_A = await self.get_primary()
+
+        await primary_A.write(key=0, value=0)
+        await primary_A.write(key=1, value=0)
+        await await_predicate(lambda: all(n.commit_index == primary_A.commit_index
+                                          for n in self.nodes.values()))
+        await primary_A.write(key=0, value=1)
+        secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
+        # Partition primary A from the majority, a new primary is elected.
+        self.network.make_partition(
+            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        primary_B = await self.get_primary(secondaries)
+        self.assertIsNot(primary_A, primary_B)
+        self.assertEqual(primary_A.role, Role.PRIMARY)
+
+        # Key 2 hasn't been written on B, we can read it.
+        self.assertEqual(await read(primary_B, 2), [])
+        # Key 0 is now in limbo, can't be read.
+        read_key_0_task = get_event_loop().create_task(
+            "read 0", primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE))
+        # Start writing - primary_B can't commit and acknowledge yet.
+        write_key_0_task = get_event_loop().create_task(
+            "0+=1", primary_B.write(key=0, value=2))
+        write_key_2_task = get_event_loop().create_task(
+            "2+=0", primary_B.write(key=2, value=0))
+        # Although we've started to write key 2, we can still read the prior term value.
+        self.assertEqual(await read(primary_B, 2), [])
+        # Key 1 is consistent, we can read it.
+        self.assertEqual(await read(primary_B, 1), [0])
+        self.assertFalse(read_key_0_task.resolved)
+        self.assertFalse(write_key_0_task.resolved)
+        self.assertFalse(write_key_2_task.resolved)
+        # Once primary_B commits an entry in its term, it can read all data.
+        await await_predicate(lambda: primary_B.commit_index > primary_A.commit_index)
+        await sleep(100)
+        self.assertTrue(read_key_0_task.resolved)
+        self.assertTrue(write_key_0_task.resolved)
+        self.assertTrue(write_key_2_task.resolved)
+        # The limbo read completes with the result of the primary_B write.
+        self.assertEqual((await read_key_0_task).value, [0, 1, 2])
+        self.assertEqual(1, primary_B.metrics.total("limbo_reads"))
+
     async def test_advance_commit_index(self):
         await self.replica_set_setup(lease_enabled=True,
                                      lease_timeout=10 * TEST_CFG.election_timeout,
@@ -246,6 +315,25 @@ class LeaseRaftTest(SimulatorTestCase):
             await write_task
 
         await await_predicate(lambda: primary_A.log == primary_B.log)
+
+    async def test_inherit_lease_disabled(self):
+        await self.replica_set_setup(
+            lease_enabled=True,
+            inherit_lease_enabled=False,
+            lease_timeout=10 * TEST_CFG.election_timeout)
+        primary_A = await self.get_primary()
+        await primary_A.write(key=0, value=0)
+        self.assertTrue(primary_A.has_lease(for_writes=True))
+        self.assertTrue(primary_A.has_lease(for_writes=False))
+        primary_B = next(n for n in self.nodes.values() if n != primary_A)
+        primary_B.become_candidate()
+        await await_predicate(lambda: primary_B.role == Role.PRIMARY)
+        self.assertFalse(primary_B.has_lease(for_writes=True))
+        # The next test would be True if inherit_lease_enabled.
+        self.assertFalse(primary_B.has_lease(for_writes=False))
+        await sleep(self.cfg.lease_timeout * (1 + primary_A.clock.max_clock_error))
+        self.assertTrue(primary_B.has_lease(for_writes=True))
+        self.assertTrue(primary_B.has_lease(for_writes=False))
 
     async def test_inherited_lease_read_is_linearizable(self):
         await self.replica_set_setup(
