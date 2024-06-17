@@ -160,6 +160,24 @@ def chart_unavailability():
     _logger.info(f"Created {chart_path}")
 
 
+def chart_skewness_experiment():
+    csv = pd.read_csv("metrics/skewness_experiment.csv")
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.plot(csv["zipf_skewness"],
+            csv["throughput_per_sec"],
+            marker="o",
+            linestyle="-")
+
+    ax.set_xlabel("Skewness")
+    ax.set_ylabel("Read throughput with inherited lease")
+    ax.set_title("Skewness Experiment")
+    ax.legend(["Throughput/sec"], loc="best")
+
+    chart_path = "metrics/skewness_experiment.pdf"
+    fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
+    _logger.info(f"Created {chart_path}")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     plt.rcParams.update({"font.size": 12})
@@ -169,3 +187,4 @@ if __name__ == "__main__":
     plt.rcParams["font.family"] = font_properties.get_name()
     chart_network_latency()
     chart_unavailability()
+    chart_skewness_experiment()
