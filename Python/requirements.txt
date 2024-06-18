@@ -1,3 +1,4 @@
 matplotlib
 omegaconf
 pandas
+scipy

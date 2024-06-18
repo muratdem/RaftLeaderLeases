@@ -164,15 +164,21 @@ def chart_skewness_experiment():
     csv = pd.read_csv("metrics/skewness_experiment.csv")
     fig, ax = plt.subplots(figsize=(6, 4))
     ax.plot(csv["zipf_skewness"],
-            csv["throughput_per_sec"],
+            csv["max_possible_throughput_per_sec"],
             marker="o",
-            linestyle="-")
+            linestyle="-",
+            color="black")
+    ax.plot(csv["zipf_skewness"],
+            csv["experimental_throughput_per_sec"],
+            marker="o",
+            linestyle="-",
+            color="C0")
 
+    ax.legend(["Attempted reads/sec",
+               "Successful reads/sec"], loc="best")
     ax.set_xlabel("Skewness")
-    ax.set_ylabel("Read throughput with inherited lease")
+    ax.set_ylabel("Read/sec with inherited lease")
     ax.set_title("Skewness Experiment")
-    ax.legend(["Throughput/sec"], loc="best")
-
     chart_path = "metrics/skewness_experiment.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")

@@ -19,7 +19,7 @@ BASE_PARAMS = DictConfig({
     # Mean time between partitions, which are Poisson-distributed.
     "heal_rate": None,  # Mean time to heal a partition, exponentially distributed.
     "keyspace_size": 5,  # Number of keys. Reads/writes choose keys at random.
-    "zipf_skewness": 1.5,  # Zipfian distro "a" param, read/write access skewness.
+    "zipf_skewness": 1,  # Zipfian distro "a" param, read/write access skewness.
     "lease_enabled": True,
     "inherit_lease_enabled": True,
     "defer_commit_enabled": True,
