@@ -388,8 +388,8 @@ class LinearizabilityTest(unittest.TestCase):
                     start_ts=4,
                     execution_ts=5,
                     end_ts=6,
-                    key=2,
-                    value=1,
+                    key=1,
+                    value=2,
                     success=True
                 ),
                 ClientLogEntry(
