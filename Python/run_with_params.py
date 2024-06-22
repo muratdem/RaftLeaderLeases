@@ -92,8 +92,16 @@ async def partition_nemesis(network: Network,
         network.reset_partition()
 
 
-def do_linearizability_check(client_log: list[ClientLogEntry], debug=True) -> None:
+def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     """Throw exception if "client_log" is not linearizable."""
+    for entry in client_log:
+        assert entry.start_ts <= entry.execution_ts
+        assert entry.execution_ts <= entry.end_ts
+
+    sorted_log = sorted(client_log, key=lambda e: e.execution_ts)
+    keys = list(sorted(set(e.key for e in sorted_log)))
+    _logger.info(f"Checking linearizability for {len(keys)} keys")
+
     # We're omniscient, we know the absolute time each event occurred, so we don't need
     # a costly checking algorithm. Just sort by the execution times.
     sorted_log = sorted(client_log, key=lambda e: e.execution_ts)
@@ -102,14 +110,14 @@ def do_linearizability_check(client_log: list[ClientLogEntry], debug=True) -> No
         _logger.info(entry)
 
     def linearize(log: list[ClientLogEntry],
-                  model: defaultdict[int, list[int]],
-                  failed_writes: list[ClientLogEntry]) -> list[ClientLogEntry] | None:
+                  value: list[int],
+                  failed_writes: list[ClientLogEntry]) -> bool:
         """Try linearizing a suffix of the log with the KV store "model" in some state.
 
         Return a linearization if possible, else None.
         """
         if len(log) == 0:
-            return log  # Empty history is already linearized.
+            return True  # Empty history is already linearized.
 
         # If there are simultaneous events, try ordering any linearization of them.
         first_entries = [e for e in log if e.execution_ts == log[0].execution_ts]
@@ -122,69 +130,55 @@ def do_linearizability_check(client_log: list[ClientLogEntry], debug=True) -> No
             log_prime = log.copy()
             log_prime.pop(i)
 
-            # Assume a failed write has no effect now, model' == model.
+            # Assume a failed write has no effect now, value' == value.
             if entry.op_type is ClientLogEntry.OpType.ListAppend and not entry.success:
                 # While recursing, try letting the write take effect later.
-                failed_writes_prime = failed_writes + [entry]
-                linearization = linearize(log_prime, model, failed_writes_prime)
-                if linearization is not None:
+                if linearize(log_prime, value, failed_writes + [entry]):
                     # Omit entry entirely from the linearization.
-                    return linearization
+                    return True
 
             # Assume the write succeeded. Even if !success it might eventually commit.
             if entry.op_type is ClientLogEntry.OpType.ListAppend:
-                model_prime = copy.deepcopy(model)
-                model_prime[entry.key].append(entry.value)
-                # Try to linearize the rest of the log with the KV store in this state.
-                linearization = linearize(log_prime, model_prime, failed_writes)
-                if linearization is not None:
-                    return [entry] + linearization
+                # Try to linearize the rest of the log with this value.
+                if linearize(log_prime, value + [entry.value], failed_writes):
+                    return True
 
             if entry.op_type is ClientLogEntry.OpType.Read:
                 # What would this query return if we ran it now?
-                if model[entry.key] != entry.value:
+                if value != entry.value:
                     continue  # "entry" can't be linearized first.
 
-                # Try to linearize the rest of the log with the KV store in this state.
-                linearization = linearize(log_prime, model, failed_writes)
-                if linearization is not None:
-                    return [entry] + linearization
+                # Try to linearize the rest of the log with this value.
+                if linearize(log_prime, value, failed_writes):
+                    return True
 
         # Linearization is failing so far, maybe one of the failed writes took effect?
         for f in failed_writes:
             failed_writes_prime = failed_writes.copy()
             failed_writes_prime.remove(f)
-            model_prime = copy.deepcopy(model)
-            model_prime[f.key].append(f.value)
-            linearization = linearize(log, model_prime, failed_writes_prime)
-            if linearization is not None:
-                return [f] + linearization
+            if linearize(log, value + [f.value], failed_writes_prime):
+                return True
 
-        return None
+        return False
 
     check_start = time.monotonic()
-    result = linearize(log=sorted_log, model=defaultdict(list), failed_writes=[])
+    for k in keys:
+        _logger.info(f"Key {k}")
+        filtered_log = [e for e in sorted_log if e.key == k]
+        for e in filtered_log:
+            _logger.info(f"\t{e}")
+
+        check_key_start = time.monotonic()
+        result = linearize(log=filtered_log, value=[], failed_writes=[])
+        if not result:
+            _logger.info(f"Failed to linearize {len(filtered_log)} entries after"
+                         f" {time.monotonic() - check_key_start:.2f} sec")
+
+            raise Exception("not linearizable!")
+
     check_duration = time.monotonic() - check_start
-    if result is None:
-        _logger.info(f"Failed to linearize {len(client_log)} entries after"
-                     f" {check_duration:.2f} sec")
-
-        if debug:
-            keys = list(sorted(set(e.key for e in sorted_log)))
-            _logger.info(f"Debugging linearizability failure for {len(keys)} keys")
-            for k in keys:
-                filtered_log = [e for e in sorted_log if e.key == k]
-                if not linearize(filtered_log, defaultdict(list)):
-                    _logger.info(f"Can't linearize for key {k}:")
-                    for e in filtered_log:
-                        _logger.info(f"\t{e}")
-
-        raise Exception("not linearizable!")
-
     _logger.info(
-        f"Linearization of {len(client_log)} entries took {check_duration:.2f} sec:")
-    for x in result:
-        _logger.info(x)
+        f"Linearization of {len(client_log)} entries took {check_duration:.2f} sec")
 
 
 def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
