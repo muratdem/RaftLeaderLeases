@@ -8,7 +8,7 @@ from client import ClientLogEntry
 from params import BASE_PARAMS
 from lease_guard import Network, Node, Role, setup_logging
 from prob import PRNG
-from run_with_params import reader, writer
+from run_with_params import do_linearizability_check, reader, writer
 from simulate import get_current_ts, get_event_loop, sleep
 
 _logger = logging.getLogger("experiment")
@@ -40,14 +40,15 @@ PARAMS.update({
     "zipf_skewness": 1.5,
     "seed": 1,
     "max_clock_error": 0,  # Less variation between sub-experiments.
+    "check_linearizability": True,
 })
 
 SUB_EXPERIMENT_PARAMS = []
 for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
-    (False, False, False, "no leases"),
-    (True, False, False, "unoptimized\nleases"),
-    (True, True, False, "inherited\nread lease"),
-    (True, True, True, "deferred\ncommit"),
+    # (False, False, False, "no leases"),
+    # (True, False, False, "unoptimized\nleases"),
+    (True, True, False, "inherited\nread lease"),  # pure python takes .91 sec linearization
+    (True, True, True, "deferred\ncommit"),  # pure python doesn't finish lin check
 ]:
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
@@ -171,6 +172,8 @@ def main():
             csv_writer.writeheader()
 
         csv_writer.writerows(stats)
+        if sub_exp_params.check_linearizability:
+            do_linearizability_check(client_log)
         event_loop.reset()
 
     csv_file.close()

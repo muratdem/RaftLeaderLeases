@@ -94,6 +94,8 @@ async def partition_nemesis(network: Network,
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     """Throw exception if "client_log" is not linearizable."""
+    import linearize  # Build from linearize.c with python setup.py build_ext --inplace.
+
     for entry in client_log:
         assert entry.start_ts <= entry.execution_ts
         assert entry.execution_ts <= entry.end_ts
@@ -105,62 +107,6 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     # We're omniscient, we know the absolute time each event occurred, so we don't need
     # a costly checking algorithm. Just sort by the execution times.
     sorted_log = sorted(client_log, key=lambda e: e.execution_ts)
-    _logger.info("Checking linearizability. Log:")
-    for entry in sorted_log:
-        _logger.info(entry)
-
-    def linearize(log: list[ClientLogEntry],
-                  value: list[int],
-                  failed_writes: list[ClientLogEntry]) -> bool:
-        """Try linearizing a suffix of the log with the KV store "model" in some state.
-
-        Return a linearization if possible, else None.
-        """
-        if len(log) == 0:
-            return True  # Empty history is already linearized.
-
-        # If there are simultaneous events, try ordering any linearization of them.
-        first_entries = [e for e in log if e.execution_ts == log[0].execution_ts]
-        for i, entry in enumerate(first_entries):
-            assert entry.start_ts <= entry.execution_ts
-            assert entry.execution_ts <= entry.end_ts
-
-            # Try linearizing "entry" at history's start. No other entry's end can
-            # precede this entry's start.
-            log_prime = log.copy()
-            log_prime.pop(i)
-
-            # Assume a failed write has no effect now, value' == value.
-            if entry.op_type is ClientLogEntry.OpType.ListAppend and not entry.success:
-                # While recursing, try letting the write take effect later.
-                if linearize(log_prime, value, failed_writes + [entry]):
-                    # Omit entry entirely from the linearization.
-                    return True
-
-            # Assume the write succeeded. Even if !success it might eventually commit.
-            if entry.op_type is ClientLogEntry.OpType.ListAppend:
-                # Try to linearize the rest of the log with this value.
-                if linearize(log_prime, value + [entry.value], failed_writes):
-                    return True
-
-            if entry.op_type is ClientLogEntry.OpType.Read:
-                # What would this query return if we ran it now?
-                if value != entry.value:
-                    continue  # "entry" can't be linearized first.
-
-                # Try to linearize the rest of the log with this value.
-                if linearize(log_prime, value, failed_writes):
-                    return True
-
-        # Linearization is failing so far, maybe one of the failed writes took effect?
-        for f in failed_writes:
-            failed_writes_prime = failed_writes.copy()
-            failed_writes_prime.remove(f)
-            if linearize(log, value + [f.value], failed_writes_prime):
-                return True
-
-        return False
-
     check_start = time.monotonic()
     for k in keys:
         _logger.info(f"Key {k}")
@@ -168,13 +114,7 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
         for e in filtered_log:
             _logger.info(f"\t{e}")
 
-        check_key_start = time.monotonic()
-        result = linearize(log=filtered_log, value=[], failed_writes=[])
-        if not result:
-            _logger.info(f"Failed to linearize {len(filtered_log)} entries after"
-                         f" {time.monotonic() - check_key_start:.2f} sec")
-
-            raise Exception("not linearizable!")
+        linearize.do_linearizability_check(filtered_log)  # Raises if not linearizable.
 
     check_duration = time.monotonic() - check_start
     _logger.info(
