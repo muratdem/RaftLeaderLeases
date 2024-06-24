@@ -40,13 +40,12 @@ PARAMS.update({
     "zipf_skewness": 1.5,
     "seed": 1,
     "max_clock_error": 0,  # Less variation between sub-experiments.
-    "check_linearizability": True,
 })
 
 SUB_EXPERIMENT_PARAMS = []
 for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
-    # (False, False, False, "no leases"),
-    # (True, False, False, "unoptimized\nleases"),
+    (False, False, False, "no leases"),
+    (True, False, False, "unoptimized\nleases"),
     (True, True, False, "inherited\nread lease"),  # pure python takes .91 sec linearization
     (True, True, True, "deferred\ncommit"),  # pure python doesn't finish lin check
 ]:

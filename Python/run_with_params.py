@@ -1,7 +1,6 @@
-import copy
 import logging
 import time
-from collections import defaultdict
+import sys
 
 from omegaconf import DictConfig
 
@@ -94,7 +93,7 @@ async def partition_nemesis(network: Network,
 
 def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     """Throw exception if "client_log" is not linearizable."""
-    import linearize  # Build from linearize.c with python setup.py build_ext --inplace.
+    sys.setrecursionlimit(1000000)
 
     for entry in client_log:
         assert entry.start_ts <= entry.execution_ts
@@ -105,16 +104,82 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     _logger.info(f"Checking linearizability for {len(keys)} keys")
 
     # We're omniscient, we know the absolute time each event occurred, so we don't need
-    # a costly checking algorithm. Just sort by the execution times.
-    sorted_log = sorted(client_log, key=lambda e: e.execution_ts)
+    # a costly checking algorithm. Just sort by the execution times. In cases where lots
+    # of writes have the same execution time (unavailability_experiment.py with
+    # defer_commit_enabled, the new primary advances its commit point and commits many
+    # writes at once), sorting also by start/end gives the checker a good start. The
+    # closer to linearized is sorted_log, the faster the checker.
+    sorted_log = sorted(client_log,
+                        key=lambda e: (e.execution_ts, e.start_ts, e.end_ts))
+
+    def linearize(log: list[ClientLogEntry],
+                  value: list[int],
+                  failed_writes: list[ClientLogEntry]) -> bool:
+        """Try linearizing a suffix of the log with the KV store "model" in some state.
+
+        Return a linearization if possible, else None.
+        """
+        if len(log) == 0:
+            return True  # Empty history is already linearized.
+
+        # If there are simultaneous events, try ordering any linearization of them.
+        first_execution_ts = log[0].execution_ts
+        for i, entry in enumerate(log):
+            if entry.execution_ts != first_execution_ts:
+                # We've tried all the entries with min exec times, linearization failed.
+                break
+
+            # Try linearizing "entry" at history's start. No other entry's end can
+            # precede this entry's start.
+            log_prime = log.copy()
+            log_prime.pop(i)
+
+            # Assume a failed write has no effect now, value' == value.
+            if entry.op_type is ClientLogEntry.OpType.ListAppend and not entry.success:
+                # While recursing, try letting the write take effect later.
+                if linearize(log_prime, value, failed_writes + [entry]):
+                    # Omit entry entirely from the linearization.
+                    return True
+
+            # Assume the write succeeded. Even if !success it might eventually commit.
+            if entry.op_type is ClientLogEntry.OpType.ListAppend:
+                # Try to linearize the rest of the log with this value.
+                if linearize(log_prime, value + [entry.value], failed_writes):
+                    return True
+
+            if entry.op_type is ClientLogEntry.OpType.Read:
+                # What would this query return if we ran it now?
+                if value != entry.value:
+                    continue  # "entry" can't be linearized first.
+
+                # Try to linearize the rest of the log with this value.
+                if linearize(log_prime, value, failed_writes):
+                    return True
+
+        # Linearization is failing so far, maybe one of the failed writes took effect?
+        for f in failed_writes:
+            failed_writes_prime = failed_writes.copy()
+            failed_writes_prime.remove(f)
+            if linearize(log, value + [f.value], failed_writes_prime):
+                return True
+
+        return False
+
+    _logger.info("Checking linearizability")
     check_start = time.monotonic()
     for k in keys:
-        _logger.info(f"Key {k}")
+        _logger.info(f"Checking linearizability for key {k}:")
         filtered_log = [e for e in sorted_log if e.key == k]
         for e in filtered_log:
             _logger.info(f"\t{e}")
 
-        linearize.do_linearizability_check(filtered_log)  # Raises if not linearizable.
+        check_key_start = time.monotonic()
+        result = linearize(log=filtered_log, value=[], failed_writes=[])
+        if not result:
+            _logger.info(f"Failed to linearize {len(filtered_log)} entries after"
+                         f" {time.monotonic() - check_key_start:.2f} sec")
+
+            raise Exception("not linearizable!")
 
     check_duration = time.monotonic() - check_start
     _logger.info(

@@ -2,4 +2,3 @@ matplotlib
 omegaconf
 pandas
 scipy
-setuptools

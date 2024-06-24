@@ -5,7 +5,7 @@ import time
 
 from client import ClientLogEntry
 from params import BASE_PARAMS
-from run_with_params import main_coro
+from run_with_params import do_linearizability_check, main_coro
 from simulate import get_event_loop
 
 _logger = logging.getLogger("experiment")
@@ -41,7 +41,6 @@ def main():
         "keyspace_size": 1000,
         "interarrival": 300,
         "log_write_micros": 250,  # SSD I/O latency.
-        "check_linearizability": False,  # For speed / avoid recursion limit error.
         "seed": 1,
     })
 
