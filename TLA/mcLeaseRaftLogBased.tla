@@ -34,6 +34,7 @@ ClockAbstractionView == LET
         currentTerm |-> currentTerm,
         state |-> state,
         log |-> log,
+        matchIndex |-> matchIndex,
         committed |-> committed,
         commitIndex |-> commitIndex,
         latestRead |-> latestRead,

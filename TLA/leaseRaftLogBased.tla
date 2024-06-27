@@ -14,6 +14,7 @@ VARIABLE currentTerm
 VARIABLE state
 VARIABLE log
 VARIABLE replicationTimes
+VARIABLE matchIndex
 VARIABLE committed
 VARIABLE commitIndex
 VARIABLE clock
@@ -25,12 +26,13 @@ TypeOK ==
     /\ state \in [Server -> {Leader, Follower}]
     /\ log \in [Server -> Seq(Entry)]
     /\ replicationTimes \in [Server -> Seq(Int)]
+    /\ matchIndex \in [Server -> [Server -> Int]]
     /\ committed \in SUBSET Entry
     /\ commitIndex \in [Server -> Int]
     /\ clock \in Int
     /\ latestRead \in [Key -> Entry]
 
-vars == <<currentTerm, state, log, replicationTimes, committed, clock, latestRead>>
+vars == <<currentTerm, state, log, replicationTimes, matchIndex, committed, clock, latestRead>>
 
 \*
 \* Helper operators.
@@ -98,13 +100,6 @@ CanVoteForOplog(i, j, term) ==
     /\ currentTerm[i] < term
     /\ logOk
 
-\* Is a log entry 'e' immediately committed with a quorum 'Q'.
-ImmediatelyCommitted(e, Q) ==
-    \A s \in Q :
-        /\ Len(log[s]) >= e.index
-        /\ log[s][e.index] = e
-        /\ currentTerm[s] = e.term  \* they are in the same term as the log entry.
-
 \* Helper operator for actions that propagate the term between two nodes.
 UpdateTermsExpr(i, j) ==
     /\ currentTerm[i] > currentTerm[j]
@@ -130,6 +125,8 @@ ClientWrite(i, k) ==
     /\ state[i] = Leader
     /\ clock' = clock + 1
     /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], k, Len(log[i]) + 1))]
+    /\ matchIndex' = [matchIndex EXCEPT ![i] = [
+        s \in Server |-> IF s=i THEN Len(log[i])+1 ELSE matchIndex[i][s]]]
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock')]
     /\ UNCHANGED <<currentTerm, state, committed, commitIndex, latestRead>>
 
@@ -147,13 +144,15 @@ ClientRead(i, k) ==
         /\ latestRead' = [latestRead EXCEPT ![k] = 
                             IF cInd = 0 THEN CreateEntry(0, k, 0)
                             ELSE log[i][cInd] ] \* Raft guarantees cInd <= Len(log[i])
-    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, commitIndex, clock>>
+    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex, committed, commitIndex, clock>>
 
 \* Node 'i' gets a new log entry from node 'j'.
+\* This follows Raft: j's term >= i's term. MongoDB doesn't require this, see
+\* "Fault-Tolerant Replication with Pull-Based Consensus in MongoDB" Section 3.3.
 GetEntries(i, j) ==
     /\ state[i] = Follower
-    \* Node j must have more entries than node i.
     /\ Len(log[j]) > Len(log[i])
+    /\ currentTerm[j] >= currentTerm[i]
        \* Ensure that the entry at the last index of node i's log must match the entry at
        \* the same index in node j's log. If the log of node i is empty, then the check
        \* trivially passes. This is the essential 'log consistency check'.
@@ -167,6 +166,9 @@ GetEntries(i, j) ==
               newReplTimes  == Append(replicationTimes[i], clock) IN
               /\ log' = [log EXCEPT ![i] = newLog]
               /\ replicationTimes' = [replicationTimes EXCEPT ![i] = newReplTimes]
+              \* Update source's matchIndex immediately & reliably (unrealistic).
+              /\ matchIndex' = [matchIndex EXCEPT ![j] = [
+                  s \in Server |-> IF s=i THEN Len(log[i])+1 ELSE matchIndex[j][s]]]
               /\ commitIndex' = [commitIndex EXCEPT ![i] = 
                   IF commitIndex[i] < commitIndex[j]
                   THEN Min ({commitIndex[j], Len(newLog)})
@@ -180,6 +182,8 @@ RollbackEntries(i, j) ==
     \* Roll back one log entry.
     /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = SubSeq(replicationTimes[i], 1, Len(log[i])-1)]
+    /\ matchIndex' = [matchIndex EXCEPT ![i] = [
+        s \in Server |-> IF s=i THEN Len(log[i])-1 ELSE matchIndex[i][s]]]
     /\ UNCHANGED <<committed, commitIndex, currentTerm, state, clock, latestRead>>
 
 \* Node 'i' gets elected as a Leader.
@@ -193,7 +197,7 @@ BecomeLeader(i, voteQuorum) ==
                     IF s = i THEN Leader
                     ELSE IF s \in voteQuorum THEN Follower \* All voters should revert to Follower state.
                     ELSE state[s]]
-    /\ UNCHANGED <<committed, replicationTimes, log, commitIndex, latestRead, clock>>
+    /\ UNCHANGED <<committed, replicationTimes, matchIndex, log, commitIndex, latestRead, clock>>
 
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
@@ -208,14 +212,14 @@ CommitEntry(i, commitQuorum) ==
            entry == log[i][ind] IN
         \* The entry was written by this leader.
         /\ entry.term = currentTerm[i]
-        \* all nodes have this log entry and are in the term of the leader.
-        /\ ImmediatelyCommitted(entry, commitQuorum)
+        \* Most nodes have this log entry and are in the term of the leader.
+        /\ \E q \in Quorums(Server) : \A s \in q : matchIndex[i][s] >= ind
         \* Don't mark an entry as committed more than once.
         /\ entry \notin committed
         /\ committed' = committed \cup {entry}
         /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
         /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]         
-        /\ UNCHANGED <<currentTerm, replicationTimes, state, log, clock>>
+        /\ UNCHANGED <<currentTerm, replicationTimes, matchIndex, state, log, clock>>
 
 \* Action that exchanges terms between two nodes and step down the Leader if
 \* needed. This can be safely specified as a separate action, rather than
@@ -224,18 +228,19 @@ CommitEntry(i, commitQuorum) ==
 \* strictly necessary for guaranteeing safety.
 UpdateTerms(i, j) ==
     /\ UpdateTermsExpr(i, j)
-    /\ UNCHANGED <<log, replicationTimes, committed, commitIndex, latestRead, clock>>
+    /\ UNCHANGED <<log, replicationTimes, matchIndex, committed, commitIndex, latestRead, clock>>
 
 \* Action for incrementing the clock
 Tick ==
     /\ clock' = clock + 1
-    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, committed, commitIndex, latestRead>>
+    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex, committed, commitIndex, latestRead>>
 
 Init ==
     /\ currentTerm = [i \in Server |-> 0]
     /\ state = [i \in Server |-> Follower]
     /\ log = [i \in Server |-> <<>>]
     /\ replicationTimes = [i \in Server |-> <<>>]
+    /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
     /\ committed = {}
     /\ commitIndex = [i \in Server |-> 0]
     /\ clock = 0
