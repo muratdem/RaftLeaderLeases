@@ -310,6 +310,7 @@ class LeaseRaftTest(SimulatorTestCase):
         await primary_B.write(key=1, value=3)
         reply = await primary_B.read(key=1, concern=ReadConcern.MAJORITY)
         self.assertEqual(reply.value, [1, 3])
+        self.assertNotEqual(primary_A.log, primary_B.log)
         self.network.reset_partition()
         with self.assertRaisesRegex(Exception, "Stepped down"):
             await write_task

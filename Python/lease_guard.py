@@ -251,6 +251,7 @@ class Node:
                     for e in self.log[index + 1:]:
                         logging.info(f"    {e}")
                     del self.log[index + 1:]
+                    self.match_index[self.node_id] = index
 
                 return
 
@@ -295,9 +296,6 @@ class Node:
                     await sleep(_BUSY_WAIT)
                     continue
 
-                _logger.debug(
-                    f"{self} replicating {len(sync_source.log) - len(self.log)} entries"
-                    f" from {sync_source}")
                 entry = sync_source.log[len(self.log)]
                 # Simulate waiting for entry to arrive. It may have arrived already.
                 apply_time = entry.ts + self.prng.one_way_latency_value()
