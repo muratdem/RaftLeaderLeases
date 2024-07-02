@@ -32,7 +32,7 @@ TypeOK ==
     /\ clock \in Int
     /\ latestRead \in [Key -> Entry]
 
-vars == <<currentTerm, state, log, replicationTimes, matchIndex, committed, clock, latestRead>>
+vars == <<currentTerm, state, log, replicationTimes, matchIndex, committed, commitIndex, clock, latestRead>>
 
 \*
 \* Helper operators.
@@ -100,12 +100,6 @@ CanVoteForOplog(i, j, term) ==
     /\ currentTerm[i] < term
     /\ logOk
 
-\* Helper operator for actions that propagate the term between two nodes.
-UpdateTermsExpr(i, j) ==
-    /\ currentTerm[i] > currentTerm[j]
-    /\ currentTerm' = [currentTerm EXCEPT ![j] = currentTerm[i]]
-    /\ state' = [state EXCEPT ![j] = Follower]
-
 \* Highest entry in server s's log that is majority-replicated.
 MaxMajorityReplicatedIndex(s) ==
     LET indexes == {index \in DOMAIN log[s] :
@@ -153,6 +147,7 @@ GetEntries(i, j) ==
     /\ state[i] = Follower
     /\ Len(log[j]) > Len(log[i])
     /\ currentTerm[j] >= currentTerm[i]
+    /\ currentTerm' = [currentTerm EXCEPT ![i] = currentTerm[j]]
        \* Ensure that the entry at the last index of node i's log must match the entry at
        \* the same index in node j's log. If the log of node i is empty, then the check
        \* trivially passes. This is the essential 'log consistency check'.
@@ -173,7 +168,7 @@ GetEntries(i, j) ==
                   IF commitIndex[i] < commitIndex[j]
                   THEN Min ({commitIndex[j], Len(newLog)})
                   ELSE commitIndex[i]]   
-    /\ UNCHANGED <<committed, currentTerm, state, clock, latestRead>>
+    /\ UNCHANGED <<committed, state, clock, latestRead>>
 
 \*  Node 'i' rolls back against the log of node 'j'.
 RollbackEntries(i, j) ==
@@ -184,7 +179,8 @@ RollbackEntries(i, j) ==
     /\ replicationTimes' = [replicationTimes EXCEPT ![i] = SubSeq(replicationTimes[i], 1, Len(log[i])-1)]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [
         s \in Server |-> IF s=i THEN Len(log[i])-1 ELSE matchIndex[i][s]]]
-    /\ UNCHANGED <<committed, commitIndex, currentTerm, state, clock, latestRead>>
+    /\ currentTerm' = [currentTerm EXCEPT ![i] = Max({currentTerm[i], currentTerm[j]})]
+    /\ UNCHANGED <<committed, commitIndex, state, clock, latestRead>>
 
 \* Node 'i' gets elected as a Leader.
 BecomeLeader(i, voteQuorum) ==
@@ -193,11 +189,13 @@ BecomeLeader(i, voteQuorum) ==
     /\ \A v \in voteQuorum : CanVoteForOplog(v, i, newTerm)
     \* Update the terms of each voter.
     /\ currentTerm' = [s \in Server |-> IF s \in voteQuorum THEN newTerm ELSE currentTerm[s]]
+    \* Reset my matchIndex.
+    /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
     /\ state' = [s \in Server |->
                     IF s = i THEN Leader
                     ELSE IF s \in voteQuorum THEN Follower \* All voters should revert to Follower state.
                     ELSE state[s]]
-    /\ UNCHANGED <<committed, replicationTimes, matchIndex, log, commitIndex, latestRead, clock>>
+    /\ UNCHANGED <<committed, replicationTimes, log, commitIndex, latestRead, clock>>
 
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
@@ -212,7 +210,7 @@ CommitEntry(i, commitQuorum) ==
            entry == log[i][ind] IN
         \* The entry was written by this leader.
         /\ entry.term = currentTerm[i]
-        \* Most nodes have this log entry and are in the term of the leader.
+        \* Most nodes have this log entry. (MongoDB checks most nodes have our term, not Raft.)
         /\ \E q \in Quorums(Server) : \A s \in q : matchIndex[i][s] >= ind
         \* Don't mark an entry as committed more than once.
         /\ entry \notin committed
@@ -221,15 +219,21 @@ CommitEntry(i, commitQuorum) ==
         /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]         
         /\ UNCHANGED <<currentTerm, replicationTimes, matchIndex, state, log, clock>>
 
-\* Action that exchanges terms between two nodes and step down the Leader if
-\* needed. This can be safely specified as a separate action, rather than
-\* occurring atomically on other replication actions that involve communication
-\* between two nodes. This makes it clearer to see where term propagation is
-\* strictly necessary for guaranteeing safety.
+\* Exchanges terms between two nodes and step down the Leader if needed.
 UpdateTerms(i, j) ==
-    /\ UpdateTermsExpr(i, j)
+    /\ currentTerm[i] > currentTerm[j]
+    /\ currentTerm' = [currentTerm EXCEPT ![j] = currentTerm[i]]
+    /\ state' = [state EXCEPT ![j] = Follower]
     /\ UNCHANGED <<log, replicationTimes, matchIndex, committed, commitIndex, latestRead, clock>>
 
+\* Node 'i' learns the commitIndex of node 'j'.
+UpdateCommitIndex(i, j) == 
+    /\ state[i] = Follower
+    /\ state[j] = Leader
+    /\ commitIndex[i] < commitIndex[j]
+    /\ commitIndex' = [commitIndex EXCEPT ![i] = commitIndex[j]]
+    /\ UNCHANGED <<state, log, replicationTimes, matchIndex, committed, currentTerm, latestRead, clock>>
+    
 \* Action for incrementing the clock
 Tick ==
     /\ clock' = clock + 1
@@ -254,6 +258,7 @@ Next ==
     \/ \E s \in Server : \E Q \in Quorums(Server) : BecomeLeader(s, Q)
     \/ \E s \in Server : \E Q \in Quorums(Server) : CommitEntry(s, Q)
     \/ \E s,t \in Server : UpdateTerms(s, t)
+    \/ \E s,t \in Server : UpdateCommitIndex(s, t)
     \/ Tick
 
 Spec == Init /\ [][Next]_vars

@@ -1,0 +1,412 @@
+@!@!@STARTMSG 2262:0 @!@!@
+TLC2 Version 2.18 of Day Month 20?? (rev: fde1c99)
+@!@!@ENDMSG 2262 @!@!@
+@!@!@STARTMSG 2187:0 @!@!@
+Running breadth-first search Model-Checking with fp 112 and seed -7770597953551419670 with 12 workers on 14 cores with 8192MB heap and 64MB offheap memory [pid: 16450] (Mac OS X 14.5 aarch64, Oracle Corporation 22.0.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+@!@!@ENDMSG 2187 @!@!@
+@!@!@STARTMSG 2220:0 @!@!@
+Starting SANY...
+@!@!@ENDMSG 2220 @!@!@
+Parsing file /Users/emptysquare/co/RaftLeaderLeases/TLA/mcLeaseRaftLogBased.tla
+Parsing file /private/var/folders/jh/ydmznf9d3wxdgwy0vg4cnvyw0000gp/T/tlc-13940643772563904370/TLC.tla (jar:file:/Users/emptysquare/.vscode/extensions/alygin.vscode-tlaplus-nightly-2024.6.2618/tools/tla2tools.jar!/tla2sany/StandardModules/TLC.tla)
+Parsing file /Users/emptysquare/co/RaftLeaderLeases/TLA/leaseRaftLogBased.tla
+Parsing file /private/var/folders/jh/ydmznf9d3wxdgwy0vg4cnvyw0000gp/T/tlc-13940643772563904370/Naturals.tla (jar:file:/Users/emptysquare/.vscode/extensions/alygin.vscode-tlaplus-nightly-2024.6.2618/tools/tla2tools.jar!/tla2sany/StandardModules/Naturals.tla)
+Parsing file /private/var/folders/jh/ydmznf9d3wxdgwy0vg4cnvyw0000gp/T/tlc-13940643772563904370/Integers.tla (jar:file:/Users/emptysquare/.vscode/extensions/alygin.vscode-tlaplus-nightly-2024.6.2618/tools/tla2tools.jar!/tla2sany/StandardModules/Integers.tla)
+Parsing file /private/var/folders/jh/ydmznf9d3wxdgwy0vg4cnvyw0000gp/T/tlc-13940643772563904370/FiniteSets.tla (jar:file:/Users/emptysquare/.vscode/extensions/alygin.vscode-tlaplus-nightly-2024.6.2618/tools/tla2tools.jar!/tla2sany/StandardModules/FiniteSets.tla)
+Parsing file /private/var/folders/jh/ydmznf9d3wxdgwy0vg4cnvyw0000gp/T/tlc-13940643772563904370/Sequences.tla (jar:file:/Users/emptysquare/.vscode/extensions/alygin.vscode-tlaplus-nightly-2024.6.2618/tools/tla2tools.jar!/tla2sany/StandardModules/Sequences.tla)
+Semantic processing of module Naturals
+Semantic processing of module Sequences
+Semantic processing of module FiniteSets
+Semantic processing of module TLC
+Semantic processing of module Integers
+Semantic processing of module leaseRaftLogBased
+Semantic processing of module mcLeaseRaftLogBased
+@!@!@STARTMSG 2219:0 @!@!@
+SANY finished.
+@!@!@ENDMSG 2219 @!@!@
+@!@!@STARTMSG 2185:0 @!@!@
+Starting... (2024-07-02 10:42:51)
+@!@!@ENDMSG 2185 @!@!@
+@!@!@STARTMSG 2189:0 @!@!@
+Computing initial states...
+@!@!@ENDMSG 2189 @!@!@
+@!@!@STARTMSG 2190:0 @!@!@
+Finished computing initial states: 1 distinct state generated at 2024-07-02 10:42:51.
+@!@!@ENDMSG 2190 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(11) at 2024-07-02 10:42:54: 515,572 states generated (515,572 s/min), 177,001 distinct states found (177,001 ds/min), 137,045 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2200:0 @!@!@
+Progress(14) at 2024-07-02 10:43:54: 20,372,092 states generated (19,856,520 s/min), 5,970,023 distinct states found (5,793,022 ds/min), 4,421,600 states left on queue.
+@!@!@ENDMSG 2200 @!@!@
+@!@!@STARTMSG 2110:1 @!@!@
+Invariant LinearizableReads is violated.
+@!@!@ENDMSG 2110 @!@!@
+@!@!@STARTMSG 2121:1 @!@!@
+The behavior up to this point is:
+@!@!@ENDMSG 2121 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+1: <Initial predicate>
+/\ matchIndex = ( n1 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = (n1 :> <<>> @@ n2 :> <<>> @@ n3 :> <<>>)
+/\ clock = 0
+/\ state = (n1 :> Follower @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ currentTerm = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ committed = {}
+/\ latestRead = ( k1 :> [term |-> 0, key |-> k1, index |-> 0] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<>> @@ n2 :> <<>> @@ n3 :> <<>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+2: <BecomeLeader(n1,{n1, n2}) line 188, col 5 to line 198, col 85 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = (n1 :> <<>> @@ n2 :> <<>> @@ n3 :> <<>>)
+/\ clock = 0
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 0)
+/\ committed = {}
+/\ latestRead = ( k1 :> [term |-> 0, key |-> k1, index |-> 0] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<>> @@ n2 :> <<>> @@ n3 :> <<>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+3: <ClientWrite(n1,k1) line 119, col 5 to line 125, col 75 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = (n1 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@ n2 :> <<>> @@ n3 :> <<>>)
+/\ clock = 1
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 0)
+/\ committed = {}
+/\ latestRead = ( k1 :> [term |-> 0, key |-> k1, index |-> 0] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1>> @@ n2 :> <<>> @@ n3 :> <<>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+4: <ClientWrite(n1,k2) line 119, col 5 to line 125, col 75 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 0 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<>> @@
+  n3 :> <<>> )
+/\ clock = 2
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 0)
+/\ committed = {}
+/\ latestRead = ( k1 :> [term |-> 0, key |-> k1, index |-> 0] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<>> @@ n3 :> <<>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+5: <GetEntries(n2,n1) line 147, col 5 to line 171, col 56 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :> <<>> )
+/\ clock = 2
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 0)
+/\ committed = {}
+/\ latestRead = ( k1 :> [term |-> 0, key |-> k1, index |-> 0] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+6: <CommitEntry(n1,{n1, n2}) line 202, col 5 to line 220, col 85 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :> <<>> )
+/\ clock = 2
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 0)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 0)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+7: <GetEntries(n3,n1) line 147, col 5 to line 171, col 56 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :> <<[term |-> 1, key |-> k1, index |-> 1]>> )
+/\ clock = 2
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Follower)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 1)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<2>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+8: <BecomeLeader(n3,{n2, n3}) line 188, col 5 to line 198, col 85 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :> <<[term |-> 1, key |-> k1, index |-> 1]>> )
+/\ clock = 2
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 2 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<2>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+9: <ClientWrite(n3,k1) line 119, col 5 to line 125, col 75 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 2) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2] >> )
+/\ clock = 3
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 2 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<2, 3>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+10: <ClientWrite(n3,k1) line 119, col 5 to line 125, col 75 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 4
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 1 @@ n2 :> 2 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+11: <UpdateTerms(n2,n1) line 224, col 5 to line 227, col 97 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 1, key |-> k2, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 4
+/\ state = (n1 :> Follower @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 2 @@ n2 :> 2 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 2>> @@ n2 :> <<2>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+12: <RollbackEntries(n1,n3) line 175, col 5 to line 183, col 69 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 1 @@ n2 :> 1 @@ n3 :> 1) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 4
+/\ state = (n1 :> Follower @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 2 @@ n2 :> 2 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1>> @@ n2 :> <<2>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+13: <BecomeLeader(n1,{n1, n2}) line 188, col 5 to line 198, col 85 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 4
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 3 @@ n2 :> 3 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1>> @@ n2 :> <<2>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+14: <ClientWrite(n1,k1) line 119, col 5 to line 125, col 75 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 0 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n2 :> <<[term |-> 1, key |-> k1, index |-> 1]>> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 5
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 0 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 3 @@ n2 :> 3 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 5>> @@ n2 :> <<2>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+15: <GetEntries(n2,n1) line 147, col 5 to line 171, col 56 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 2 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n2 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 5
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 1 @@ n2 :> 1 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 3 @@ n2 :> 3 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 5>> @@ n2 :> <<2, 5>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+16: <CommitEntry(n1,{n1, n2}) line 202, col 5 to line 220, col 85 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 2 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n2 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 5
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 3 @@ n2 :> 3 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1], [term |-> 3, key |-> k1, index |-> 2]}
+/\ latestRead = ( k1 :> [term |-> 3, key |-> k1, index |-> 2] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 5>> @@ n2 :> <<2, 5>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2217:4 @!@!@
+17: <ClientRead(n3,k1) line 130, col 5 to line 141, col 105 of module leaseRaftLogBased>
+/\ matchIndex = ( n1 :> (n1 :> 2 @@ n2 :> 2 @@ n3 :> 0) @@
+  n2 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 0) @@
+  n3 :> (n1 :> 0 @@ n2 :> 0 @@ n3 :> 3) )
+/\ log = ( n1 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n2 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 3, key |-> k1, index |-> 2] >> @@
+  n3 :>
+      << [term |-> 1, key |-> k1, index |-> 1],
+         [term |-> 2, key |-> k1, index |-> 2],
+         [term |-> 2, key |-> k1, index |-> 3] >> )
+/\ clock = 5
+/\ state = (n1 :> Leader @@ n2 :> Follower @@ n3 :> Leader)
+/\ commitIndex = (n1 :> 2 @@ n2 :> 1 @@ n3 :> 1)
+/\ currentTerm = (n1 :> 3 @@ n2 :> 3 @@ n3 :> 2)
+/\ committed = {[term |-> 1, key |-> k1, index |-> 1], [term |-> 3, key |-> k1, index |-> 2]}
+/\ latestRead = ( k1 :> [term |-> 1, key |-> k1, index |-> 1] @@
+  k2 :> [term |-> 0, key |-> k2, index |-> 0] )
+/\ replicationTimes = (n1 :> <<1, 5>> @@ n2 :> <<2, 5>> @@ n3 :> <<2, 3, 4>>)
+
+@!@!@ENDMSG 2217 @!@!@
+@!@!@STARTMSG 2199:0 @!@!@
+2781557502 states generated, 498613809 distinct states found, 281370170 states left on queue.
+@!@!@ENDMSG 2199 @!@!@
+@!@!@STARTMSG 2194:0 @!@!@
+The depth of the complete state graph search is 18.
+@!@!@ENDMSG 2194 @!@!@
+@!@!@STARTMSG 2186:0 @!@!@
+Finished in 7677456ms at (2024-07-02 12:50:48)
+@!@!@ENDMSG 2186 @!@!@
