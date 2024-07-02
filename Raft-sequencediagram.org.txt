@@ -1,0 +1,19 @@
+box over Leader:commitIndex=1
+space -2.4
+Leader->Follower 1:AppendEntries\nleaderCommit=1
+space -2.6
+Leader->(1)Follower 2:
+space -2
+box over Follower 1,Follower 2:commitIndex=1
+space -3
+Follower 1->(1)Leader:acknowledge
+space -3
+Follower 2->(0)Leader:acknowledge
+box over Leader:commitIndex=2
+space -2.4
+Leader->Follower 1:AppendEntries\nleaderCommit=2
+space -2.6
+Leader->(1)Follower 2:
+space -2
+box over Follower 1,Follower 2:commitIndex=2
+space -4.5
