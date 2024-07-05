@@ -4,7 +4,7 @@ import logging
 import statistics
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, Collection, Union
 
 from omegaconf import DictConfig
 
@@ -102,12 +102,14 @@ class Network:
             _logger.debug(f"{from_id} -> {to_id}: {method.__name__} DROPPED")
 
     def make_partition(self,
-                       left_partition: set[int],
-                       right_partition: set[int]) -> None:
-        assert left_partition.isdisjoint(right_partition)
-        assert left_partition.union(right_partition) == set(self.node_ids)
-        self.left_partition = left_partition
-        self.right_partition = right_partition
+                       left_partition: Collection[Union[int, "Node"]],
+                       right_partition: Collection[Union[int, "Node"]]) -> None:
+        lp = set(n.node_id if isinstance(n, Node) else n for n in left_partition)
+        rp = set(n.node_id if isinstance(n, Node) else n for n in right_partition)
+        assert lp.isdisjoint(rp)
+        assert lp.union(rp) == set(self.node_ids)
+        self.left_partition = lp
+        self.right_partition = rp
         _logger.info(f"Partitioned {self.left_partition} from {self.right_partition}")
 
     def make_random_partition(self):
@@ -292,6 +294,7 @@ class Node:
                     continue
 
                 self._maybe_rollback(sync_source)
+                self._update_commit_index(sync_source.commit_index)
                 if len(self.log) >= len(sync_source.log):
                     await sleep(_BUSY_WAIT)
                     continue

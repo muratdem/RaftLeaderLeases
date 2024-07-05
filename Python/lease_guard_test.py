@@ -6,6 +6,7 @@ from unittest import TestCase
 
 from omegaconf import DictConfig
 
+from client import client_read, client_write
 from run_with_params import ClientLogEntry, do_linearizability_check
 from lease_guard import Network, Node, ReadConcern, Role, setup_logging
 from prob import PRNG
@@ -99,6 +100,11 @@ class LeaseRaftTest(SimulatorTestCase):
         return await await_predicate(
             lambda: next((n for n in nodes if n.role == Role.PRIMARY), None))
 
+    async def all_committed(self):
+        p = await self.get_primary()
+        return await await_predicate(
+            lambda: all(n.commit_index == p.commit_index for n in self.nodes.values()))
+
     async def read_from_stale_primary(self,
                                       concern: ReadConcern,
                                       expected_result: list[int],
@@ -175,8 +181,7 @@ class LeaseRaftTest(SimulatorTestCase):
         primary_A = await self.get_primary()
         # Make sure all nodes have commit_index > -1.
         await primary_A.write(key=0, value=0)
-        await await_predicate(lambda: all(n.commit_index == primary_A.commit_index
-                                          for n in self.nodes.values()))
+        await self.all_committed()
 
         self.assertTrue(primary_A.has_lease(for_writes=True))
         self.assertTrue(primary_A.has_lease(for_writes=False))
@@ -233,8 +238,7 @@ class LeaseRaftTest(SimulatorTestCase):
 
         await primary_A.write(key=0, value=0)
         await primary_A.write(key=1, value=0)
-        await await_predicate(lambda: all(n.commit_index == primary_A.commit_index
-                                          for n in self.nodes.values()))
+        await self.all_committed()
         await primary_A.write(key=0, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
         # Partition primary A from the majority, a new primary is elected.
@@ -346,8 +350,7 @@ class LeaseRaftTest(SimulatorTestCase):
         primary_A = await self.get_primary()
         # All nodes learn this write is committed.
         await primary_A.write(key=0, value=0)
-        await await_predicate(lambda: all(n.commit_index == primary_A.commit_index
-                                          for n in self.nodes.values()))
+        await self.all_committed()
         # Only primary_A learns this write is committed.
         await primary_A.write(key=0, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
@@ -369,6 +372,62 @@ class LeaseRaftTest(SimulatorTestCase):
             [0, 1],
             (await primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE)).value)
         self.assertGreater(primary_B.commit_index, primary_A.commit_index)
+
+    async def test_inherited_lease_read_2_elections(self):
+        # A creates and commits an entry e1 in term t1, B replicates e1, then later C
+        # replicates e1, then both learn e1 is committed. C becomes a leader in t2,
+        # then B becomes leader in t3. (A steps down and votes for C, then B.) There
+        # is a time when B thinks e1 has expired but C thinks e1 is valid, because B
+        # replicated e1 before C did. During this time, B commits a write e2. (It's
+        # allowed, B thinks e1 expired, and B has the highest term.) But C serves a
+        # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
+        # read doesn't observe B's write -> linearizability violation.
+        await self.replica_set_setup(
+            lease_enabled=True,
+            inherit_lease_enabled=True,
+            defer_commit_enabled=False,  # simplifies test
+            lease_timeout=10 * TEST_CFG.election_timeout,
+            noop_rate=1e10)
+        A = await self.get_primary()
+        B, C = [n for n in self.nodes.values() if n is not A]
+        self.network.make_partition([A, B], set([C]))
+
+        # A creates and commits an entry e1 in term t1.
+        log = [await client_write(A, key=0, value=1)]
+
+        # Later C replicates e1, then both learn e1 is committed.
+        await sleep(300)
+        self.network.reset_partition()
+        await await_predicate(lambda: C.commit_index == A.commit_index)
+        self.assertGreater(C.log[-1].local_ts, A.log[-1].local_ts + 300)
+        await self.all_committed()
+
+        # C becomes leader in t2, with a vote from A (which sees t2 and steps down).
+        self.network.make_partition([A, C], set([B]))
+        C.become_candidate()
+        await await_predicate(lambda: C.role == Role.PRIMARY)
+        self.assertEqual(A.role, Role.SECONDARY)
+
+        # B runs for election twice. It can't lead t2, but it can lead t3 with A's vote.
+        self.network.make_partition([A, B], set([C]))
+        B.become_candidate()
+        B.become_candidate()
+        await await_predicate(lambda: B.role == Role.PRIMARY)
+        self.assertEqual(A.role, Role.SECONDARY)
+        self.assertEqual(C.role, Role.PRIMARY)
+
+        # There is a time when B thinks e1 has expired but C thinks e1 is valid, because
+        # B replicated e1 before C did. During this time, B commits a write e2. (It's
+        # allowed, B thinks e1 expired, and B has the highest term.) But C serves a
+        # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
+        # read doesn't observe B's write -> linearizability violation.
+        await await_predicate(lambda: B.has_lease(for_writes=True))
+        self.assertTrue(C.has_lease(for_writes=False))
+        self.assertFalse(C.has_lease(for_writes=True))
+        log.append(await client_write(B, key=0, value=2))
+        await sleep(1)  # Distinguish write and read timestamps.
+        log.append(await client_read(C, key=0))
+        do_linearizability_check(log)
 
 
 class LinearizabilityTest(unittest.TestCase):
