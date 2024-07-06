@@ -200,6 +200,7 @@ class Node:
         self.current_term = 0
         # Map from term to the id of the node we voted for in that term.
         self.voted_for: dict[int, int] = {}
+        self.last_voted_ts = -99999999999
         self.log: list[Write] = []
         self.commit_index = -1
         # Map from node id to the node's last-replicated log index.
@@ -208,6 +209,8 @@ class Node:
         self.nodes: dict[int, Node] = {}
         # Node indexes of nodes that voted for us in each term.
         self.votes_received: defaultdict[int, set] = defaultdict(set)
+        # In which terms have I been warned against using an inherited lease?
+        self.warned_in_term: defaultdict[int, bool] = defaultdict(bool)
         self.noop_rate: int = cfg.noop_rate
         self.election_timeout: int = cfg.election_timeout
         self.heartbeat_rate: int = cfg.heartbeat_rate
@@ -232,7 +235,7 @@ class Node:
             while True:
                 await sleep(self.noop_rate)
                 if self.role is Role.PRIMARY:
-                    _logger.info(f"{self} writing noop")
+                    _logger.debug(f"{self} writing noop")
                     self._write_internal(_NOOP, _NOOP)
         except Exception as e:
             _logger.exception(e)
@@ -271,7 +274,9 @@ class Node:
                     min_term=self.current_term,
                     min_ts=now - self.election_timeout)
 
-                if not primary_ids:
+                if primary_ids:
+                    self._reset_election_deadline()
+                else:
                     if self.election_deadline <= now:
                         self.become_candidate()  # Resets election deadline.
 
@@ -294,9 +299,12 @@ class Node:
                     continue
 
                 self._maybe_rollback(sync_source)
-                self._update_commit_index(sync_source.commit_index)
+                commit_index = sync_source.commit_index
                 if len(self.log) >= len(sync_source.log):
-                    await sleep(_BUSY_WAIT)
+                    # Empty batch of entries, but we learn the source's commit index.
+                    await sleep(self.prng.one_way_latency_value())
+                    if self.role is Role.SECONDARY:
+                        self._update_commit_index(commit_index)
                     continue
 
                 entry = sync_source.log[len(self.log)]
@@ -307,10 +315,10 @@ class Node:
                     # Elected while waiting.
                     continue
 
+                self._update_commit_index(commit_index)
                 lag = get_current_ts() - entry.ts
                 _logger.debug(
                     f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
-                self._reset_election_deadline()
                 # Update entry's local_ts, for tracking leases.
                 self.log.append(entry.copy_with_local_ts(self.clock.now()))
                 self.match_index[self.node_id] = len(self.log) - 1
@@ -391,10 +399,12 @@ class Node:
         if self.role is not Role.SECONDARY:
             return
 
-        self._reset_election_deadline()
         self.current_term += 1
-        _logger.info(f"{self} running for election in term {self.current_term}")
+        _logger.info(f"{self} deadline {self.election_deadline} passed,"
+                     f" running for election in term {self.current_term}")
+        self._reset_election_deadline()
         self.voted_for[self.current_term] = self.node_id
+        self.last_voted_ts = self.clock.now()
         self.votes_received[self.current_term] = set([self.node_id])
         for node in self.nodes.values():
             if node is not self:
@@ -409,6 +419,7 @@ class Node:
                      last_log_term: int) -> None:
         """I'm a voter, receiving a candidate's RequestVote message."""
         granted = True
+        warn = False  # Warn candidate against using inherited lease?
         if term < self.current_term:
             granted = False
             logging.debug(f"{self} voting against {candidate_id}, stale term {term}")
@@ -432,7 +443,11 @@ class Node:
             logging.debug(f"{self} voting against {candidate_id}, my log is longer")
 
         if granted:
-            logging.debug(f"{self} voting for {candidate_id}")
+            now = self.clock.now()
+            warn = now - self.last_voted_ts <= self.lease_timeout
+            self.last_voted_ts = now
+            logging.debug(f"{self} voting for {candidate_id},"
+                          f" warn_against_inherited_lease={warn}")
             self.voted_for[term] = candidate_id
             self._reset_election_deadline()
 
@@ -440,11 +455,17 @@ class Node:
                           self.nodes[candidate_id].receive_vote,
                           voter_id=self.node_id,
                           term=self.current_term,
-                          vote_granted=granted)
+                          vote_granted=granted,
+                          warn_against_inherited_lease=warn)
 
-    def receive_vote(self, voter_id: int, term: int, vote_granted: bool) -> None:
+    def receive_vote(self,
+                     voter_id: int,
+                     term: int,
+                     vote_granted: bool,
+                     warn_against_inherited_lease) -> None:
         """I'm a candidate, receiving a yes or no vote."""
-        logging.debug(f"{self} received {vote_granted} vote from {voter_id}")
+        logging.debug(f"{self} received {vote_granted} vote from {voter_id},"
+                      f" warn_against_inherited_lease={warn_against_inherited_lease}")
         if term > self.current_term:
             self.current_term = term
             # Delayed vote reply reveals that we've been superseded.
@@ -453,10 +474,15 @@ class Node:
                 self.stepdown()
         elif term == self.current_term and vote_granted and self.role is Role.SECONDARY:
             self.votes_received[term].add(voter_id)
+            if warn_against_inherited_lease:
+                self.warned_in_term[term] = True
             if len(self.votes_received[term]) > len(self.nodes) / 2:
                 self.role = Role.PRIMARY
-                logging.info(f"{self} elected in term {self.current_term}")
-                if self.inherit_lease_enabled:
+                logging.info(
+                    f"{self} elected in term {self.current_term},"
+                    f" {'' if self.warned_in_term[term] else 'NOT '}warned against"
+                    f" inherited lease")
+                if self.inherit_lease_enabled and not self.warned_in_term[term]:
                     assert not self.log or self.log[-1].term < term
                     logging.debug(
                         f"Limbo region {self.commit_index} to {len(self.log) - 1}")
@@ -469,7 +495,8 @@ class Node:
     def _update_commit_index(self, index: int) -> None:
         """Primary advances index, or secondary receives primary's index."""
         self.commit_index = max(self.commit_index, index)
-        # A secondary can learn of a commit index higher than it has replicated.
+        # A MongoDB secondary can learn of a commit index higher than it has replicated.
+        # NOTE: this follows MongoDB, whereas our TLA+ follows Raft.
         start_i = min(len(self.log) - 1, self.commit_index)
         # Reverse-iter, mark when entries became visible to rc:majority on this node.
         # This info is used to check linearizability.
@@ -530,7 +557,9 @@ class Node:
 
         lease_timeout_with_slop = self.lease_timeout * (1 + self.clock.max_clock_error)
         lease_start = self.clock.now() - lease_timeout_with_slop
-        if for_writes or not self.inherit_lease_enabled:
+        if (for_writes
+            or not self.inherit_lease_enabled
+            or self.warned_in_term[self.current_term]):
             # Wait for past leader's lease to expire.
             prior_entry = next(
                 (e for e in reversed(self.log) if e.term != self.current_term), None)

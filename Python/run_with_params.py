@@ -169,7 +169,10 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
     check_start = time.monotonic()
     for k in keys:
         _logger.info(f"Checking linearizability for key {k}:")
-        filtered_log = [e for e in sorted_log if e.key == k]
+        # Ignore failed reads.
+        filtered_log = [
+            e for e in sorted_log if
+            e.key == k and (e.op_type is ClientLogEntry.OpType.ListAppend or e.success)]
         for e in filtered_log:
             _logger.info(f"\t{e}")
 

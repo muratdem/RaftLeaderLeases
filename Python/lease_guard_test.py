@@ -75,7 +75,7 @@ TEST_CFG = DictConfig({
 
 
 class LeaseRaftTest(SimulatorTestCase):
-    async def replica_set_setup(self, **kwargs) -> None:
+    async def replica_set_setup(self, delay_after_election=True, **kwargs) -> None:
         self.cfg = copy.deepcopy(TEST_CFG)
         self.cfg.update(kwargs)
         self.prng = PRNG(cfg=self.cfg)
@@ -92,6 +92,10 @@ class LeaseRaftTest(SimulatorTestCase):
 
         # Kickstart. If by bad luck we have multiple candidates it messes with tests.
         self.nodes[1].become_candidate()
+        if delay_after_election:
+            # Avoid warn_against_inherited_lease when next primary is elected.
+            await self.get_primary()
+            await sleep(self.cfg.lease_timeout + 1)
 
     async def get_primary(self, nodes: set[Node] | None = None) -> Node:
         if nodes is None:
@@ -153,7 +157,8 @@ class LeaseRaftTest(SimulatorTestCase):
                                                lease_enabled=True)
 
     async def test_has_lease(self):
-        await self.replica_set_setup(lease_enabled=True,
+        await self.replica_set_setup(delay_after_election=False,
+                                     lease_enabled=True,
                                      inherit_lease_enabled=True,
                                      noop_rate=1e10)
         # The primary writes a no-op when it's elected, but that isn't committed yet.
@@ -383,6 +388,7 @@ class LeaseRaftTest(SimulatorTestCase):
         # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
         # read doesn't observe B's write -> linearizability violation.
         await self.replica_set_setup(
+            delay_after_election=False,
             lease_enabled=True,
             inherit_lease_enabled=True,
             defer_commit_enabled=False,  # simplifies test
@@ -399,6 +405,7 @@ class LeaseRaftTest(SimulatorTestCase):
         await sleep(300)
         self.network.reset_partition()
         await await_predicate(lambda: C.commit_index == A.commit_index)
+        await await_predicate(lambda: len(C.log) == len(A.log))
         self.assertGreater(C.log[-1].local_ts, A.log[-1].local_ts + 300)
         await self.all_committed()
 
@@ -422,7 +429,8 @@ class LeaseRaftTest(SimulatorTestCase):
         # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
         # read doesn't observe B's write -> linearizability violation.
         await await_predicate(lambda: B.has_lease(for_writes=True))
-        self.assertTrue(C.has_lease(for_writes=False))
+        # warn_against_inherited_lease to the rescue, A told C not to use lease.
+        self.assertFalse(C.has_lease(for_writes=False))
         self.assertFalse(C.has_lease(for_writes=True))
         log.append(await client_write(B, key=0, value=2))
         await sleep(1)  # Distinguish write and read timestamps.
