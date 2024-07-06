@@ -75,6 +75,14 @@ TEST_CFG = DictConfig({
 
 
 class LeaseRaftTest(SimulatorTestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.client_log: list[ClientLogEntry] = []
+        
+    def tearDown(self) -> None:
+        do_linearizability_check(self.client_log)
+        super().tearDown()
+
     async def replica_set_setup(self, delay_after_election=True, **kwargs) -> None:
         self.cfg = copy.deepcopy(TEST_CFG)
         self.cfg.update(kwargs)
@@ -108,6 +116,20 @@ class LeaseRaftTest(SimulatorTestCase):
         p = await self.get_primary()
         return await await_predicate(
             lambda: all(n.commit_index == p.commit_index for n in self.nodes.values()))
+    
+    async def read(self, node: Node, key: int) -> int:
+        entry = await client_read(node, key=key)
+        self.client_log.append(entry)
+        if entry.success:
+            return entry.value
+        
+        raise entry.exception
+    
+    async def write(self, node: Node, key: int, value: int) -> None:
+        entry = await client_write(node, key=key, value=value)
+        self.client_log.append(entry)
+        if not entry.success:
+            raise entry.exception
 
     async def read_from_stale_primary(self,
                                       concern: ReadConcern,
@@ -185,7 +207,7 @@ class LeaseRaftTest(SimulatorTestCase):
                                      lease_timeout=20000)
         primary_A = await self.get_primary()
         # Make sure all nodes have commit_index > -1.
-        await primary_A.write(key=0, value=0)
+        await self.write(primary_A, key=0, value=0)
         await self.all_committed()
 
         self.assertTrue(primary_A.has_lease(for_writes=True))
@@ -202,20 +224,19 @@ class LeaseRaftTest(SimulatorTestCase):
         # The new primary can use the old one's lease for reads.
         self.assertTrue(primary_B.has_lease(for_writes=False))
         self.assertFalse(primary_B.has_lease(for_writes=True))
-        reply = await primary_A.read(key=0, concern=ReadConcern.MAJORITY)
-        self.assertEqual(reply.value, [0])
+        self.assertEqual(await self.read(primary_A, key=0), [0])
 
         # The write waits for primary B to acquire a writer lease.
-        await primary_B.write(key=1, value=1)
-        reply = await primary_B.read(key=1, concern=ReadConcern.MAJORITY)
-        self.assertEqual(reply.value, [1])
+        await self.write(primary_B, key=1, value=1)
+        self.assertEqual(await self.read(primary_B, key=1), [1])
         self.assertTrue(primary_B.has_lease(for_writes=True))
         self.assertTrue(primary_B.has_lease(for_writes=False))
 
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
-            await primary_A.read(key=1, concern=ReadConcern.MAJORITY)
+            await self.read(primary_A, key=1)
 
     async def test_limbo_read(self):
+        # OUTLINE:
         # Key 0, value 0 is appended on primary A and all nodes learn it's committed.
         #
         # Key 0, value 1 is appended on A and replicated to all nodes, but only A
@@ -228,11 +249,8 @@ class LeaseRaftTest(SimulatorTestCase):
         #
         # Key 2 is written to B before B gets a write lease. Test that key 2 can be
         # read on B before it's written, or after B gets a write lease, but not between.
-
-        async def read(node: Node, key: int) -> list[int]:
-            reply = await node.read(key=key, concern=ReadConcern.LINEARIZABLE)
-            return reply.value
-
+        
+        # BEGIN:
         # Lease timeout > election timeout, so we have a stale leaseholder.
         await self.replica_set_setup(lease_enabled=True,
                                      inherit_lease_enabled=True,
@@ -241,10 +259,10 @@ class LeaseRaftTest(SimulatorTestCase):
                                      lease_timeout=20000)
         primary_A = await self.get_primary()
 
-        await primary_A.write(key=0, value=0)
-        await primary_A.write(key=1, value=0)
+        await self.write(primary_A, key=0, value=0)
+        await self.write(primary_A, key=1, value=0)
         await self.all_committed()
-        await primary_A.write(key=0, value=1)
+        await self.write(primary_A, key=0, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
         # Partition primary A from the majority, a new primary is elected.
         self.network.make_partition(
@@ -254,7 +272,7 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertEqual(primary_A.role, Role.PRIMARY)
 
         # Key 2 hasn't been written on B, we can read it.
-        self.assertEqual(await read(primary_B, 2), [])
+        self.assertEqual(await self.read(primary_B, 2), [])
         # Key 0 is now in limbo, can't be read.
         read_key_0_task = get_event_loop().create_task(
             "read 0", primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE))
@@ -264,9 +282,9 @@ class LeaseRaftTest(SimulatorTestCase):
         write_key_2_task = get_event_loop().create_task(
             "2+=0", primary_B.write(key=2, value=0))
         # Although we've started to write key 2, we can still read the prior term value.
-        self.assertEqual(await read(primary_B, 2), [])
+        self.assertEqual(await self.read(primary_B, 2), [])
         # Key 1 is consistent, we can read it.
-        self.assertEqual(await read(primary_B, 1), [0])
+        self.assertEqual(await self.read(primary_B, 1), [0])
         self.assertFalse(read_key_0_task.resolved)
         self.assertFalse(write_key_0_task.resolved)
         self.assertFalse(write_key_2_task.resolved)
@@ -285,7 +303,7 @@ class LeaseRaftTest(SimulatorTestCase):
                                      lease_timeout=10 * TEST_CFG.election_timeout,
                                      noop_rate=1e10)
         primary_A = await self.get_primary()
-        await primary_A.write(key=1, value=1)
+        await self.write(primary_A, key=1, value=1)
         commit_index = primary_A.commit_index
         await await_predicate(
             lambda: all(n.log == primary_A.log for n in self.nodes.values()))
@@ -305,7 +323,7 @@ class LeaseRaftTest(SimulatorTestCase):
         # Nothing to do with leases, just make sure rollback logic works.
         await self.replica_set_setup(lease_enabled=False)
         primary_A = await self.get_primary()
-        await primary_A.write(key=1, value=1)
+        await self.write(primary_A, key=1, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
 
         # Partition primary A from the majority, a new primary is elected.
@@ -316,9 +334,8 @@ class LeaseRaftTest(SimulatorTestCase):
         primary_B = await self.get_primary(secondaries)
 
         # Write to the new primary, heal the partition, old primary steps down.
-        await primary_B.write(key=1, value=3)
-        reply = await primary_B.read(key=1, concern=ReadConcern.MAJORITY)
-        self.assertEqual(reply.value, [1, 3])
+        await self.write(primary_B, key=1, value=3)
+        self.assertEqual(await self.read(primary_B, key=1), [1, 3])
         self.assertNotEqual(primary_A.log, primary_B.log)
         self.network.reset_partition()
         with self.assertRaisesRegex(Exception, "Stepped down"):
@@ -332,7 +349,7 @@ class LeaseRaftTest(SimulatorTestCase):
             inherit_lease_enabled=False,
             lease_timeout=10 * TEST_CFG.election_timeout)
         primary_A = await self.get_primary()
-        await primary_A.write(key=0, value=0)
+        await self.write(primary_A, key=0, value=0)
         self.assertTrue(primary_A.has_lease(for_writes=True))
         self.assertTrue(primary_A.has_lease(for_writes=False))
         primary_B = next(n for n in self.nodes.values() if n != primary_A)
@@ -354,10 +371,10 @@ class LeaseRaftTest(SimulatorTestCase):
             noop_rate=1e10)
         primary_A = await self.get_primary()
         # All nodes learn this write is committed.
-        await primary_A.write(key=0, value=0)
+        await self.write(primary_A, key=0, value=0)
         await self.all_committed()
         # Only primary_A learns this write is committed.
-        await primary_A.write(key=0, value=1)
+        await self.write(primary_A, key=0, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
         self.network.make_partition(
             set([primary_A.node_id]), set(n.node_id for n in secondaries))
@@ -373,9 +390,7 @@ class LeaseRaftTest(SimulatorTestCase):
         # This read is in the "limbo" zone between primary_B's commit index and its
         # newest log entry. It waits for its commit index to catch up before reading.
         self.assertLess(primary_B.commit_index, primary_A.commit_index)
-        self.assertEqual(
-            [0, 1],
-            (await primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE)).value)
+        self.assertEqual([0, 1], await self.read(primary_B, key=0))
         self.assertGreater(primary_B.commit_index, primary_A.commit_index)
 
     async def test_inherited_lease_read_2_elections(self):
@@ -399,7 +414,7 @@ class LeaseRaftTest(SimulatorTestCase):
         self.network.make_partition([A, B], set([C]))
 
         # A creates and commits an entry e1 in term t1.
-        log = [await client_write(A, key=0, value=1)]
+        await self.write(A, key=0, value=1)
 
         # Later C replicates e1, then both learn e1 is committed.
         await sleep(300)
@@ -429,13 +444,15 @@ class LeaseRaftTest(SimulatorTestCase):
         # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
         # read doesn't observe B's write -> linearizability violation.
         await await_predicate(lambda: B.has_lease(for_writes=True))
-        # warn_against_inherited_lease to the rescue, A told C not to use lease.
+        # warn_against_inherited_lease to the rescue, A warned C not to use lease.
+        self.assertTrue(C.warned_in_term[C.current_term])
         self.assertFalse(C.has_lease(for_writes=False))
         self.assertFalse(C.has_lease(for_writes=True))
-        log.append(await client_write(B, key=0, value=2))
-        await sleep(1)  # Distinguish write and read timestamps.
-        log.append(await client_read(C, key=0))
-        do_linearizability_check(log)
+        await self.write(B, key=0, value=2)
+        await sleep(1)  # Distinguish write & read timestamps for linearizability check.
+        # C doesn't use inherited lease, due to A's warning.
+        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
+            await self.read(C, key=0)
 
 
 class LinearizabilityTest(unittest.TestCase):
