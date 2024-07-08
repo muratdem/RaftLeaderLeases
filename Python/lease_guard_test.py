@@ -428,7 +428,7 @@ class LeaseRaftTest(SimulatorTestCase):
         await await_predicate(lambda: C.role == Role.PRIMARY)
         self.assertEqual(A.role, Role.SECONDARY)
 
-        # B runs for election twice. It can't lead t2, but it can lead t3 with A's vote.
+        # B becomes leader in t3 with A's vote.
         self.network.make_partition([A, B], set([C]))
         B.become_candidate()
         await await_predicate(lambda: B.role == Role.PRIMARY)
