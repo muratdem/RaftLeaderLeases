@@ -8,7 +8,7 @@
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 
 CONSTANTS Server, Key, Delta
-CONSTANTS Follower, Leader, Nil
+CONSTANTS Follower, Leader
 
 VARIABLE currentTerm
 VARIABLE state
