@@ -46,8 +46,8 @@ SUB_EXPERIMENT_PARAMS = []
 for lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
     (False, False, False, "no leases"),
     (True, False, False, "unoptimized\nleases"),
-    (True, True, False, "inherited\nread lease"),  # pure python takes .91 sec linearization
-    (True, True, True, "deferred\ncommit"),  # pure python doesn't finish lin check
+    (True, True, False, "inherited\nread lease"),
+    (True, True, True, "deferred\ncommit"),
 ]:
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
