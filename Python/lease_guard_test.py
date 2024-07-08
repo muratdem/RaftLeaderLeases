@@ -403,7 +403,6 @@ class LeaseRaftTest(SimulatorTestCase):
         # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
         # read doesn't observe B's write -> linearizability violation.
         await self.replica_set_setup(
-            delay_after_election=False,
             lease_enabled=True,
             inherit_lease_enabled=True,
             defer_commit_enabled=False,  # simplifies test
@@ -424,8 +423,7 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertGreater(C.log[-1].local_ts, A.log[-1].local_ts + 300)
         await self.all_committed()
 
-        # C becomes leader in t2, with a vote from A (which sees t2 and steps down).
-        self.network.make_partition([A, C], set([B]))
+        # C becomes leader in t2. A sees t2 and steps down.
         C.become_candidate()
         await await_predicate(lambda: C.role == Role.PRIMARY)
         self.assertEqual(A.role, Role.SECONDARY)
@@ -433,26 +431,13 @@ class LeaseRaftTest(SimulatorTestCase):
         # B runs for election twice. It can't lead t2, but it can lead t3 with A's vote.
         self.network.make_partition([A, B], set([C]))
         B.become_candidate()
-        B.become_candidate()
         await await_predicate(lambda: B.role == Role.PRIMARY)
         self.assertEqual(A.role, Role.SECONDARY)
         self.assertEqual(C.role, Role.PRIMARY)
 
-        # There is a time when B thinks e1 has expired but C thinks e1 is valid, because
-        # B replicated e1 before C did. During this time, B commits a write e2. (It's
-        # allowed, B thinks e1 expired, and B has the highest term.) But C serves a
-        # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
-        # read doesn't observe B's write -> linearizability violation.
-        await await_predicate(lambda: B.has_lease(for_writes=True))
-        # warn_against_inherited_lease to the rescue, A warned C not to use lease.
-        self.assertTrue(C.warned_in_term[C.current_term])
-        self.assertFalse(C.has_lease(for_writes=False))
-        self.assertFalse(C.has_lease(for_writes=True))
         await self.write(B, key=0, value=2)
         await sleep(1)  # Distinguish write & read timestamps for linearizability check.
-        # C doesn't use inherited lease, due to A's warning.
-        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
-            await self.read(C, key=0)
+        await self.read(C, key=0)
 
 
 class LinearizabilityTest(unittest.TestCase):

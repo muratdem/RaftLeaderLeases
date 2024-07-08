@@ -278,6 +278,7 @@ class Node:
                     self._reset_election_deadline()
                 else:
                     if self.election_deadline <= now:
+                        _logger.info(f"{self} deadline {self.election_deadline} passed")
                         self.become_candidate()  # Resets election deadline.
 
                     await sleep(_BUSY_WAIT)
@@ -400,8 +401,7 @@ class Node:
             return
 
         self.current_term += 1
-        _logger.info(f"{self} deadline {self.election_deadline} passed,"
-                     f" running for election in term {self.current_term}")
+        _logger.info(f"{self} running for election in term {self.current_term}")
         self._reset_election_deadline()
         self.voted_for[self.current_term] = self.node_id
         self.last_voted_ts = self.clock.now()
