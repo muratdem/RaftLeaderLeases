@@ -10,7 +10,7 @@ StateConstraint ==
         /\ Len(log[s]) <= MaxLogLen
         /\ clock <= MaxClock
 
-ServerSymmetry == Permutations(Server)
+ServerAndKeySymmetry == Permutations(Server) \union Permutations(Key)
 
 SeqToSet(S) == { S[i] : i \in 1..Len(S) }
 
