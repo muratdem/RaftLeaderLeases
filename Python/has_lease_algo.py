@@ -4,18 +4,15 @@ See lease_guard.py for the executable version.
 """
 
 def has_lease(self, for_commit: bool) -> bool:
-  if self.role is not PRIMARY: return False
-  # Compensate for max clock drift.
-  lease_start = (self.clock.now()
-    - lease_timeout * (1 + max_clock_error))
+  if self.state != "primary": return False
   if for_commit:
-    # If I replicated a past term's entry
-    # < lease_timeout ago, past leader may
-    # have a lease.
+    # Compensate for max clock error.
+    lease_start = (self.clock.now()
+      - lease_timeout - max_clock_error)
     for e in reversed(self.log):
       if e.term == self.current_term:
         continue
-      if e.time_when_i_replicated >= lease_start:
+      if e.timestamp >= lease_start:
         # Past leader may have lease.
         return False
       # Don't need to check older entries.
@@ -27,7 +24,8 @@ def has_lease(self, for_commit: bool) -> bool:
     # "Inherited read lease" means I can read
     # while a prior leader's lease is valid.
     entry = self.log[self.commit_index]
-    if entry.time_when_i_replicated < lease_start:
+    if entry.timestamp <= (self.clock.now()
+        - lease_timeout):
       # Last committed entry is too old.
       return False
   return True
