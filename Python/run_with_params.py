@@ -99,8 +99,7 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
         assert entry.start_ts <= entry.execution_ts
         assert entry.execution_ts <= entry.end_ts
 
-    sorted_log = sorted(client_log, key=lambda e: e.execution_ts)
-    keys = list(sorted(set(e.key for e in sorted_log)))
+    keys = list(sorted(set(e.key for e in client_log)))
     _logger.info(f"Checking linearizability for {len(keys)} keys")
 
     # We're omniscient, we know the absolute time each event occurred, so we don't need
