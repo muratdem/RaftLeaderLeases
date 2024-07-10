@@ -137,7 +137,6 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
             if entry.op_type is ClientLogEntry.OpType.ListAppend and not entry.success:
                 # While recursing, try letting the write take effect later.
                 if linearize(log_prime, value, failed_writes + [entry]):
-                    # Omit entry entirely from the linearization.
                     return True
 
             # Assume the write succeeded. Even if !success it might eventually commit.
