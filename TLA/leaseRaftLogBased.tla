@@ -13,26 +13,24 @@ CONSTANTS Follower, Leader
 VARIABLE currentTerm
 VARIABLE state
 VARIABLE log
-VARIABLE replicationTimes
 VARIABLE matchIndex
 VARIABLE committed
 VARIABLE commitIndex
 VARIABLE clock
 VARIABLE latestRead
 
-Entry == [term: Int, key: Key, index: Int]
+Entry == [term: Int, key: Key, index: Int, timestamp: Int]
 TypeOK ==
     /\ currentTerm \in [Server -> Int]
     /\ state \in [Server -> {Leader, Follower}]
     /\ log \in [Server -> Seq(Entry)]
-    /\ replicationTimes \in [Server -> Seq(Int)]
     /\ matchIndex \in [Server -> [Server -> Int]]
     /\ committed \in SUBSET Entry
     /\ commitIndex \in [Server -> Int]
     /\ clock \in Int
     /\ latestRead \in [Key -> Entry]
 
-vars == <<currentTerm, state, log, replicationTimes, matchIndex, committed, commitIndex, clock, latestRead>>
+vars == <<currentTerm, state, log, matchIndex, committed, commitIndex, clock, latestRead>>
 
 \*
 \* Helper operators.
@@ -43,9 +41,10 @@ Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j)
 Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
 Range(f) == {f[x]: x \in DOMAIN f}
-CreateEntry(xterm, xkey, xindex) == [term |-> xterm, key |-> xkey, index |-> xindex]
+CreateEntry(xterm, xkey, xindex, xtimestamp) == [
+    term |-> xterm, key |-> xkey, index |-> xindex, timestamp |-> xtimestamp]
 FilterKey(S,k) == {e \in S: e.key=k}
-MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0 THEN CreateEntry(0, k, 0)
+MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0 THEN CreateEntry(0, k, 0, -1)
                       ELSE CHOOSE i \in FilterKey(S,k): (\A j \in FilterKey(S,k): i.index >= j.index)
 
 
@@ -118,10 +117,10 @@ MaxMajorityReplicatedIndex(s) ==
 ClientWrite(i, k) ==
     /\ state[i] = Leader
     /\ clock' = clock + 1
-    /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(currentTerm[i], k, Len(log[i]) + 1))]
+    /\ log' = [log EXCEPT ![i] = Append(
+        log[i], CreateEntry(currentTerm[i], k, Len(log[i]) + 1, clock'))]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [
         s \in Server |-> IF s=i THEN Len(log[i])+1 ELSE matchIndex[i][s]]]
-    /\ replicationTimes' = [replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock')]
     /\ UNCHANGED <<currentTerm, state, committed, commitIndex, latestRead>>
 
 \* This may only set latestRead to an earlier value than what is committed, 
@@ -130,15 +129,15 @@ ClientRead(i, k) ==
     /\ state[i] = Leader
     /\ Len(log[i]) > 0
     /\ commitIndex[i] > 0
-    /\ replicationTimes[i][commitIndex[i]] + Delta >= clock
+    /\ log[i][commitIndex[i]].timestamp + Delta >= clock
     \* limbo-read guarding for inherited lease
     /\ currentTerm[i] # log[i][commitIndex[i]].term =>
         LastCommitted(k, i) = LastInPriorTerm(k, i)
     /\ LET cInd == LastCommitted(k, i) IN
         /\ latestRead' = [latestRead EXCEPT ![k] = 
-                            IF cInd = 0 THEN CreateEntry(0, k, 0)
+                            IF cInd = 0 THEN CreateEntry(0, k, 0, -1)
                             ELSE log[i][cInd] ] \* Raft guarantees cInd <= Len(log[i])
-    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex, committed, commitIndex, clock>>
+    /\ UNCHANGED <<currentTerm, state, log, matchIndex, committed, commitIndex, clock>>
 
 \* Node 'i' gets a new log entry from node 'j'.
 \* This follows Raft: j's term >= i's term. MongoDB doesn't require this, see
@@ -157,10 +156,8 @@ GetEntries(i, j) ==
        /\ logOk \* log consistency check
        /\ LET newEntryIndex == IF Empty(log[i]) THEN 1 ELSE Len(log[i]) + 1
               newEntry      == log[j][newEntryIndex]
-              newLog        == Append(log[i], newEntry)
-              newReplTimes  == Append(replicationTimes[i], clock) IN
+              newLog        == Append(log[i], newEntry) IN
               /\ log' = [log EXCEPT ![i] = newLog]
-              /\ replicationTimes' = [replicationTimes EXCEPT ![i] = newReplTimes]
               \* Update source's matchIndex immediately & reliably (unrealistic).
               /\ matchIndex' = [matchIndex EXCEPT ![j] = [
                   s \in Server |-> IF s=i THEN Len(log[i])+1 ELSE matchIndex[j][s]]]
@@ -176,7 +173,6 @@ RollbackEntries(i, j) ==
     /\ CanRollback(i, j)
     \* Roll back one log entry.
     /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
-    /\ replicationTimes' = [replicationTimes EXCEPT ![i] = SubSeq(replicationTimes[i], 1, Len(log[i])-1)]
     /\ matchIndex' = [matchIndex EXCEPT ![i] = [
         s \in Server |-> IF s=i THEN Len(log[i])-1 ELSE matchIndex[i][s]]]
     /\ currentTerm' = [currentTerm EXCEPT ![i] = Max({currentTerm[i], currentTerm[j]})]
@@ -195,7 +191,7 @@ BecomeLeader(i, voteQuorum) ==
                     IF s = i THEN Leader
                     ELSE IF s \in voteQuorum THEN Follower \* All voters should revert to Follower state.
                     ELSE state[s]]
-    /\ UNCHANGED <<committed, replicationTimes, log, commitIndex, latestRead, clock>>
+    /\ UNCHANGED <<committed, log, commitIndex, latestRead, clock>>
 
 \* Leader 'i' commits its latest log entry.
 CommitEntry(i, commitQuorum) ==
@@ -203,7 +199,7 @@ CommitEntry(i, commitQuorum) ==
     /\ Len(log[i]) > 0
     \* Last entry replicated from prior leader was at least Delta ago.
     /\ \A index \in DOMAIN log[i] : 
-        log[i][index].term # currentTerm[i] => (replicationTimes[i][index] + Delta < clock)
+        log[i][index].term # currentTerm[i] => (log[i][index].timestamp + Delta < clock)
     \* Must have some entries to commit.
     /\ commitIndex[i] < Len(log[i]) 
     /\ LET ind == commitIndex[i]+1
@@ -217,14 +213,14 @@ CommitEntry(i, commitQuorum) ==
         /\ committed' = committed \cup {entry}
         /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
         /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]         
-        /\ UNCHANGED <<currentTerm, replicationTimes, matchIndex, state, log, clock>>
+        /\ UNCHANGED <<currentTerm, matchIndex, state, log, clock>>
 
 \* Exchanges terms between two nodes and step down the Leader if needed.
 UpdateTerms(i, j) ==
     /\ currentTerm[i] > currentTerm[j]
     /\ currentTerm' = [currentTerm EXCEPT ![j] = currentTerm[i]]
     /\ state' = [state EXCEPT ![j] = Follower]
-    /\ UNCHANGED <<log, replicationTimes, matchIndex, committed, commitIndex, latestRead, clock>>
+    /\ UNCHANGED <<log, matchIndex, committed, commitIndex, latestRead, clock>>
 
 \* Node 'i' learns the commitIndex of node 'j'.
 UpdateCommitIndex(i, j) == 
@@ -232,23 +228,22 @@ UpdateCommitIndex(i, j) ==
     /\ state[j] = Leader
     /\ commitIndex[i] < commitIndex[j]
     /\ commitIndex' = [commitIndex EXCEPT ![i] = commitIndex[j]]
-    /\ UNCHANGED <<state, log, replicationTimes, matchIndex, committed, currentTerm, latestRead, clock>>
+    /\ UNCHANGED <<state, log, matchIndex, committed, currentTerm, latestRead, clock>>
     
 \* Action for incrementing the clock
 Tick ==
     /\ clock' = clock + 1
-    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex, committed, commitIndex, latestRead>>
+    /\ UNCHANGED <<currentTerm, state, log, matchIndex, committed, commitIndex, latestRead>>
 
 Init ==
     /\ currentTerm = [i \in Server |-> 0]
     /\ state = [i \in Server |-> Follower]
     /\ log = [i \in Server |-> <<>>]
-    /\ replicationTimes = [i \in Server |-> <<>>]
     /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
     /\ committed = {}
     /\ commitIndex = [i \in Server |-> 0]
     /\ clock = 0
-    /\ latestRead = [k \in Key |-> CreateEntry(0, k, 0)]
+    /\ latestRead = [k \in Key |-> CreateEntry(0, k, 0, -1)]
 
 Next ==
     \/ \E s \in Server : \E k \in Key : ClientWrite(s,k)
@@ -273,10 +268,6 @@ EntryIndexes ==
     \A s \in Server:
         \A index \in DOMAIN log[s]:
             log[s][index].index = index
-
-LogAndReplicationTimesLengths ==
-    \A s \in Server:
-        Len(log[s]) = Len(replicationTimes[s])
 
 OneLeaderPerTerm ==
     \A s,t \in Server :

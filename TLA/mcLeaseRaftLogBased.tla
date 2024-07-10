@@ -12,33 +12,33 @@ StateConstraint ==
 
 ServerAndKeySymmetry == Permutations(Server) \union Permutations(Key)
 
-SeqToSet(S) == { S[i] : i \in 1..Len(S) }
-
 \* This is a "view". The model-checker considers two states equivalent if they
-\* produce the same view. We reduce the state space by normalizing replication
-\* times so the smallest time is always 0: e.g., [server1 |-> <<1, 2>>] is the
-\* same as [server1 |-> <<2, 3>>], they are both normalized to [server1 |-> 
-\* <<0, 1>>]. Since the spec only cares about time differences, not absolute
-\* time, it's safe to normalize times this way and it makes model-checking
-\* practical. See Lamport, "Real-Time Model Checking is Really Simple", 2005.
+\* produce the same view. We reduce the state space by normalizing entries'
+\* timestamps so the smallest time is always 0: e.g., [server1 |-> <<[term |->
+\* 1, key |-> k1, index |-> 1, timestamp |-> 2]>>] is the same as [term |-> 1,
+\* key |-> k1, index |-> 1, timestamp |-> 99], they are both normalized so the
+\* timestamp is 0. Since the spec only cares about time differences, not
+\* absolute time, it's safe to normalize times this way and it makes
+\* model-checking practical. See Lamport, "Real-Time Model Checking is Really
+\* Simple", 2005.
+
 ClockAbstractionView == LET
-    allTimes == UNION { SeqToSet(replicationTimes[s]) : s \in Server }
+    allTimes == UNION { UNION { log[s][i].timestamp : i \in 1..Len(log[s]) } : s \in Server }
     start == IF allTimes = {} THEN 0 ELSE Min(allTimes)
-    normalizedReplicationTimes == [
+    normalizedLog == [
         s \in Server |-> [
-            i \in DOMAIN replicationTimes[s] |-> replicationTimes[s][i] - start
+            i \in DOMAIN log[s] |-> CreateEntry(log[s][i].term, log[s][i].key, log[s][i].index, log[s][i].timestamp - start)
         ]
     ]
-    \* All vars but replace replicationTimes w/ normalizedReplicationTimes, omit clock!
+    \* All vars but replace log w/ normalizedLog, omit clock!
     IN [
         currentTerm |-> currentTerm,
         state |-> state,
-        log |-> log,
+        normalizedLog |-> normalizedLog,
         matchIndex |-> matchIndex,
         committed |-> committed,
         commitIndex |-> commitIndex,
-        latestRead |-> latestRead,
-        normalizedReplicationTimes |-> normalizedReplicationTimes
+        latestRead |-> latestRead
     ]
 
 ====
