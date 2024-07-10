@@ -2,7 +2,7 @@ from omegaconf import DictConfig
 
 BASE_PARAMS = DictConfig({
     # All times in microseconds.
-    "max_clock_error": 0.00003,  # From Huygens paper.
+    "max_clock_error": 15 * 1000,  # Very inaccurate clock.
     "election_timeout": 500 * 1000,  # 1/2 second, high to avoid flapping.
     # Time for message to go from one replica set node to another.
     "one_way_latency_mean": 191,

@@ -37,9 +37,8 @@ PARAMS.update({
     # SSD I/O latency.
     "log_write_micros": 250,
     "keyspace_size": 1000,
-    "zipf_skewness": 1.5,
+    "zipf_skewness": 0,
     "seed": 1,
-    "max_clock_error": 0,  # Less variation between sub-experiments.
 })
 
 SUB_EXPERIMENT_PARAMS = []

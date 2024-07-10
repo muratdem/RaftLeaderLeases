@@ -10,7 +10,7 @@ from client import client_read, client_write
 from run_with_params import ClientLogEntry, do_linearizability_check
 from lease_guard import Network, Node, ReadConcern, Role, setup_logging
 from prob import PRNG
-from simulate import get_event_loop, sleep
+from simulate import get_current_ts, get_event_loop, sleep
 
 logging.basicConfig(level=logging.INFO)
 
@@ -52,7 +52,7 @@ async def await_predicate(predicate):
 
 
 TEST_CFG = DictConfig({
-    "max_clock_error": 0.1,
+    "max_clock_error": 15,
     "election_timeout": 1000,
     "one_way_latency_mean": 125,
     "one_way_latency_variance": 100,
@@ -78,12 +78,12 @@ class LeaseRaftTest(SimulatorTestCase):
     def setUp(self) -> None:
         super().setUp()
         self.client_log: list[ClientLogEntry] = []
-        
+
     def tearDown(self) -> None:
         do_linearizability_check(self.client_log)
         super().tearDown()
 
-    async def replica_set_setup(self, delay_after_election=True, **kwargs) -> None:
+    async def replica_set_setup(self, **kwargs) -> None:
         self.cfg = copy.deepcopy(TEST_CFG)
         self.cfg.update(kwargs)
         self.prng = PRNG(cfg=self.cfg)
@@ -100,10 +100,6 @@ class LeaseRaftTest(SimulatorTestCase):
 
         # Kickstart. If by bad luck we have multiple candidates it messes with tests.
         self.nodes[1].become_candidate()
-        if delay_after_election:
-            # Avoid warn_against_inherited_lease when next primary is elected.
-            await self.get_primary()
-            await sleep(self.cfg.lease_timeout + 1)
 
     async def get_primary(self, nodes: set[Node] | None = None) -> Node:
         if nodes is None:
@@ -116,20 +112,22 @@ class LeaseRaftTest(SimulatorTestCase):
         p = await self.get_primary()
         return await await_predicate(
             lambda: all(n.commit_index == p.commit_index for n in self.nodes.values()))
-    
+
     async def read(self, node: Node, key: int) -> int:
         entry = await client_read(node, key=key)
         self.client_log.append(entry)
         if entry.success:
             return entry.value
-        
+
         raise entry.exception
-    
-    async def write(self, node: Node, key: int, value: int) -> None:
+
+    async def write(self, node: Node, key: int, value: int) -> ClientLogEntry:
         entry = await client_write(node, key=key, value=value)
         self.client_log.append(entry)
         if not entry.success:
             raise entry.exception
+
+        return entry
 
     async def read_from_stale_primary(self,
                                       concern: ReadConcern,
@@ -140,8 +138,7 @@ class LeaseRaftTest(SimulatorTestCase):
         # Make sure primary A has commit index > -1.
         await primary_A.write(key=0, value=0)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
-        self.network.make_partition(
-            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        self.network.make_partition([primary_A], secondaries)
         primary_B = await self.get_primary(secondaries)
         self.assertIsNot(primary_A, primary_B)
         self.assertEqual(primary_A.role, Role.PRIMARY)
@@ -179,8 +176,7 @@ class LeaseRaftTest(SimulatorTestCase):
                                                lease_enabled=True)
 
     async def test_has_lease(self):
-        await self.replica_set_setup(delay_after_election=False,
-                                     lease_enabled=True,
+        await self.replica_set_setup(lease_enabled=True,
                                      inherit_lease_enabled=True,
                                      noop_rate=1e10)
         # The primary writes a no-op when it's elected, but that isn't committed yet.
@@ -194,7 +190,7 @@ class LeaseRaftTest(SimulatorTestCase):
         await await_predicate(lambda: primary.commit_index > -1)
         self.assertTrue(primary.has_lease(for_writes=False))
         self.assertTrue(primary.has_lease(for_writes=True))
-        await sleep(int(self.cfg.lease_timeout * (1 + primary.clock.max_clock_error)))
+        await sleep(self.cfg.lease_timeout + primary.clock.max_clock_error)
         # Can't read: last committed entry is older than lease timeout.
         self.assertFalse(primary.has_lease(for_writes=False))
         # Still has write lease: there are no entries from prior term.
@@ -215,8 +211,7 @@ class LeaseRaftTest(SimulatorTestCase):
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
 
         # Partition primary A from the majority, a new primary is elected.
-        self.network.make_partition(
-            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        self.network.make_partition([primary_A], secondaries)
         primary_B = await self.get_primary(secondaries)
         self.assertIsNot(primary_A, primary_B)
         self.assertEqual(primary_A.role, Role.PRIMARY)
@@ -249,7 +244,7 @@ class LeaseRaftTest(SimulatorTestCase):
         #
         # Key 2 is written to B before B gets a write lease. Test that key 2 can be
         # read on B before it's written, or after B gets a write lease, but not between.
-        
+
         # BEGIN:
         # Lease timeout > election timeout, so we have a stale leaseholder.
         await self.replica_set_setup(lease_enabled=True,
@@ -265,8 +260,7 @@ class LeaseRaftTest(SimulatorTestCase):
         await self.write(primary_A, key=0, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
         # Partition primary A from the majority, a new primary is elected.
-        self.network.make_partition(
-            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        self.network.make_partition([primary_A], secondaries)
         primary_B = await self.get_primary(secondaries)
         self.assertIsNot(primary_A, primary_B)
         self.assertEqual(primary_A.role, Role.PRIMARY)
@@ -308,14 +302,13 @@ class LeaseRaftTest(SimulatorTestCase):
         await await_predicate(
             lambda: all(n.log == primary_A.log for n in self.nodes.values()))
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
-        self.network.make_partition(
-            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        self.network.make_partition([primary_A], secondaries)
         primary_B = await self.get_primary(secondaries)
         self.assertIsNot(primary_A, primary_B)
         # New primary waits for prior term's entries to be > lease timeout old.
         self.assertFalse(primary_B.has_lease(for_writes=True))
         self.assertLessEqual(primary_B.commit_index, commit_index)
-        await sleep(int(self.cfg.lease_timeout * (1 + primary_A.clock.max_clock_error)))
+        await sleep(self.cfg.lease_timeout + primary_A.clock.max_clock_error)
         self.assertGreater(primary_B.commit_index, commit_index)
         self.assertTrue(primary_B.has_lease(for_writes=True))
 
@@ -327,8 +320,7 @@ class LeaseRaftTest(SimulatorTestCase):
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
 
         # Partition primary A from the majority, a new primary is elected.
-        self.network.make_partition(
-            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        self.network.make_partition([primary_A], secondaries)
         write_task = self.loop.create_task(
             "stale primary write", primary_A.write(key=1, value=2))
         primary_B = await self.get_primary(secondaries)
@@ -358,7 +350,7 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertFalse(primary_B.has_lease(for_writes=True))
         # The next test would be True if inherit_lease_enabled.
         self.assertFalse(primary_B.has_lease(for_writes=False))
-        await sleep(self.cfg.lease_timeout * (1 + primary_A.clock.max_clock_error))
+        await sleep(self.cfg.lease_timeout + primary_A.clock.max_clock_error)
         self.assertTrue(primary_B.has_lease(for_writes=True))
         self.assertTrue(primary_B.has_lease(for_writes=False))
 
@@ -376,8 +368,7 @@ class LeaseRaftTest(SimulatorTestCase):
         # Only primary_A learns this write is committed.
         await self.write(primary_A, key=0, value=1)
         secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
-        self.network.make_partition(
-            set([primary_A.node_id]), set(n.node_id for n in secondaries))
+        self.network.make_partition([primary_A], secondaries)
         # Promote a secondary that hasn't learned the new commit index.
         primary_B = min(secondaries, key=lambda n: n.commit_index)
         self.assertLess(primary_B.commit_index, primary_A.commit_index)
@@ -393,15 +384,83 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertEqual([0, 1], await self.read(primary_B, key=0))
         self.assertGreater(primary_B.commit_index, primary_A.commit_index)
 
+    async def test_clock_error_compensation(self):
+        # Test that commit lease uses max_clock_error, but not read lease.
+        cfg = copy.deepcopy(TEST_CFG)
+        cfg.lease_timeout = 10 * 1000
+        prng = PRNG(cfg=cfg)
+        network = Network(prng=prng, node_ids=[1, 2, 3])
+
+        class Clock:
+            def __init__(self, offset: int):
+                self.offset = offset
+                self.max_clock_error = abs(offset)
+
+            def now(self) -> int:
+                return get_current_ts() + self.offset
+
+        clock1 = Clock(0)
+        clock2 = Clock(-1000)  # Node 2, aka "B", has a slow clock.
+        clock3 = Clock(0)
+        nodes = {
+            1: Node(node_id=1, cfg=cfg, prng=prng, network=network, clock=clock1),
+            2: Node(node_id=2, cfg=cfg, prng=prng, network=network, clock=clock2),
+            3: Node(node_id=3, cfg=cfg, prng=prng, network=network, clock=clock3),
+        }
+
+        setup_logging(nodes)
+        for n in nodes.values():
+            n.initiate(nodes)
+
+        # Kickstart. If by bad luck we have multiple candidates it messes with tests.
+        nodes[1].become_candidate()
+
+        # A is elected, commits in term 1, then B leads term 2 while A still leads 1.
+        A = await self.get_primary(set(nodes.values()))
+        entry = await self.write(A, key=0, value=1)
+        await await_predicate(
+            lambda: all(n.commit_index == A.commit_index for n in nodes.values()))
+        B, C = [n for n in nodes.values() if n is not A]
+        network.make_partition([A], [B, C])
+        B.become_candidate()
+        await await_predicate(lambda: B.role == Role.PRIMARY)
+        self.assertEqual(A.role, Role.PRIMARY)
+
+        # A thinks it can commit (though in fact it can't majority-replicate because
+        # it's partitioned, and B and C have advanced their terms).
+        self.assertGreater(entry.start_ts + cfg.lease_timeout, get_current_ts())
+        self.assertTrue(A.has_lease(for_writes=True))
+        self.assertTrue(A.has_lease(for_writes=False))
+        # B can't write until its term-1 entry is at least Delta old.
+        self.assertFalse(B.has_lease(for_writes=True))
+        # B can read as long as its term-1 entry is less than Delta old.
+        self.assertTrue(B.has_lease(for_writes=False))
+
+        # This is the last moment of A's read lease.
+        lease_expire_absolute = entry.start_ts + cfg.lease_timeout
+        self.assertGreater(lease_expire_absolute, get_current_ts())
+        await sleep(lease_expire_absolute - get_current_ts())
+        self.assertTrue(A.has_lease(for_writes=True))
+        self.assertTrue(A.has_lease(for_writes=False))
+        self.assertFalse(B.has_lease(for_writes=True))
+        self.assertTrue(B.has_lease(for_writes=False))
+
+        await sleep(1)
+        self.assertTrue(A.has_lease(for_writes=True))
+        # A's read lease expires.
+        self.assertFalse(A.has_lease(for_writes=False))
+        # B is worried about clock skew, keeps waiting to commit.
+        self.assertFalse(B.has_lease(for_writes=True))
+        self.assertTrue(B.has_lease(for_writes=False))
+
+        await sleep(B.clock.max_clock_error * 2)
+        self.assertTrue(B.has_lease(for_writes=True))
+        self.assertTrue(B.has_lease(for_writes=False))
+
     async def test_inherited_lease_read_2_elections(self):
         # A creates and commits an entry e1 in term t1, B replicates e1, then later C
         # replicates e1, then both learn e1 is committed. C becomes a leader in t2,
-        # then B becomes leader in t3. (A steps down and votes for C, then B.) There
-        # is a time when B thinks e1 has expired but C thinks e1 is valid, because B
-        # replicated e1 before C did. During this time, B commits a write e2. (It's
-        # allowed, B thinks e1 expired, and B has the highest term.) But C serves a
-        # read (it's allowed, C thinks e1 is committed and less than Delta old). C's
-        # read doesn't observe B's write -> linearizability violation.
+        # then B becomes leader in t3. (A steps down and votes for C, then B.)
         await self.replica_set_setup(
             lease_enabled=True,
             inherit_lease_enabled=True,
@@ -410,17 +469,14 @@ class LeaseRaftTest(SimulatorTestCase):
             noop_rate=1e10)
         A = await self.get_primary()
         B, C = [n for n in self.nodes.values() if n is not A]
-        self.network.make_partition([A, B], set([C]))
+        self.network.make_partition([A, B], [C])
 
         # A creates and commits an entry e1 in term t1.
         await self.write(A, key=0, value=1)
 
         # Later C replicates e1, then both learn e1 is committed.
-        await sleep(300)
         self.network.reset_partition()
-        await await_predicate(lambda: C.commit_index == A.commit_index)
-        await await_predicate(lambda: len(C.log) == len(A.log))
-        self.assertGreater(C.log[-1].local_ts, A.log[-1].local_ts + 300)
+        await await_predicate(lambda: C.log == A.log)
         await self.all_committed()
 
         # C becomes leader in t2. A sees t2 and steps down.
@@ -429,7 +485,7 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertEqual(A.role, Role.SECONDARY)
 
         # B becomes leader in t3 with A's vote.
-        self.network.make_partition([A, B], set([C]))
+        self.network.make_partition([A, B], [C])
         B.become_candidate()
         await await_predicate(lambda: B.role == Role.PRIMARY)
         self.assertEqual(A.role, Role.SECONDARY)
@@ -437,7 +493,8 @@ class LeaseRaftTest(SimulatorTestCase):
 
         await self.write(B, key=0, value=2)
         await sleep(1)  # Distinguish write & read timestamps for linearizability check.
-        await self.read(C, key=0)
+        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
+            await self.read(C, key=0)
 
 
 class LinearizabilityTest(unittest.TestCase):

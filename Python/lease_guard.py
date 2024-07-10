@@ -34,14 +34,13 @@ class Write:
     term: int
     ts: Timestamp
     """Timestamp from originating primary's clock."""
-    local_ts: Timestamp = field(compare=False)
-    """Timestamp at this server's clock."""
+    created_at_absolute_ts: Timestamp
+    """Absolute timestamp when primary created this write."""
     committed_at_absolute_ts: Timestamp | None = field(compare=False, default=None)
     """Absolute timestamp at which this node learned this write was committed."""
 
-    def copy_with_local_ts(self, local_ts: Timestamp) -> "Write":
+    def copy(self) -> "Write":
         entry = copy.copy(self)
-        entry.local_ts = local_ts
         entry.committed_at_absolute_ts = None
         return entry
 
@@ -148,11 +147,8 @@ class _Monitor:
     def received_ping(self, node_id: int, role: Role, term: int, ts: Timestamp) -> None:
         self.pings[node_id] = _Monitor.PeerPing(role=role, term=term, ts=ts)
 
-    def last_primary_timestamp(self) -> Timestamp:
-        return max(
-            (p.ts for p in self.pings.values() if p.role == Role.PRIMARY), default=-1)
-
     def primaries(self, min_term: int, min_ts: Timestamp) -> list[int]:
+        """Primaries we've heard from since min_ts with term>=min_term."""
         return [node_id for node_id, p in self.pings.items()
                 if p.term >= min_term and p.ts >= min_ts and p.role == Role.PRIMARY]
 
@@ -161,23 +157,21 @@ class _NodeClock:
     """One node's clock."""
 
     def __init__(self, cfg: DictConfig, prng: PRNG):
-        self.previous_true_ts: float = get_current_ts()
-        self.previous_ts: float = get_current_ts()
-        self.max_clock_error: float = cfg.max_clock_error
+        self.previous_ts: int = get_current_ts()
+        self.max_clock_error: int = cfg.max_clock_error
         self.prng = prng
 
     def now(self) -> int:
-        now = get_current_ts()
-        true_span = now - self.previous_true_ts
         if self.max_clock_error > 0:
-            next_ts = self.prng.uniform(
-                self.previous_ts + true_span * (1 - self.max_clock_error),
-                self.previous_ts + true_span * (1 + self.max_clock_error))
+            now = get_current_ts()
+            # Return monotonically increasing, jittery timestamps.
+            next_ts = max(self.previous_ts, int(self.prng.uniform(
+                now - self.max_clock_error // 2,
+                now + self.max_clock_error // 2)))
+            self.previous_ts = next_ts
+            return next_ts
         else:
-            next_ts = get_current_ts()
-        self.previous_ts = next_ts
-        self.previous_true_ts = now
-        return int(next_ts)
+            return int(get_current_ts())
 
 
 _NOOP = -1
@@ -185,11 +179,16 @@ _BUSY_WAIT = 10
 
 
 class Node:
-    def __init__(self, node_id: int, cfg: DictConfig, prng: PRNG, network: Network):
+    def __init__(self,
+                 node_id: int,
+                 cfg: DictConfig,
+                 prng: PRNG,
+                 network: Network,
+                 clock=None):
         self.node_id = node_id
         self.role = Role.SECONDARY
         self.prng = prng
-        self.clock = _NodeClock(cfg, prng)
+        self.clock = _NodeClock(cfg, prng) if clock is None else clock
         self.network = network
         self.monitor = _Monitor()
         self.lease_enabled: bool = cfg.lease_enabled
@@ -200,7 +199,6 @@ class Node:
         self.current_term = 0
         # Map from term to the id of the node we voted for in that term.
         self.voted_for: dict[int, int] = {}
-        self.last_voted_ts = -99999999999
         self.log: list[Write] = []
         self.commit_index = -1
         # Map from node id to the node's last-replicated log index.
@@ -209,8 +207,6 @@ class Node:
         self.nodes: dict[int, Node] = {}
         # Node indexes of nodes that voted for us in each term.
         self.votes_received: defaultdict[int, set] = defaultdict(set)
-        # In which terms have I been warned against using an inherited lease?
-        self.warned_in_term: defaultdict[int, bool] = defaultdict(bool)
         self.noop_rate: int = cfg.noop_rate
         self.election_timeout: int = cfg.election_timeout
         self.heartbeat_rate: int = cfg.heartbeat_rate
@@ -293,7 +289,7 @@ class Node:
                 self.monitor.received_ping(node_id=sync_source.node_id,
                                            role=sync_source.role,
                                            term=sync_source.current_term,
-                                           ts=self.clock.now())
+                                           ts=now)
                 if sync_source.current_term < self.current_term:
                     _logger.info(f"{sync_source} stepping down, {self} has higher term")
                     sync_source.stepdown()
@@ -310,18 +306,18 @@ class Node:
 
                 entry = sync_source.log[len(self.log)]
                 # Simulate waiting for entry to arrive. It may have arrived already.
-                apply_time = entry.ts + self.prng.one_way_latency_value()
+                apply_time = (
+                    entry.created_at_absolute_ts + self.prng.one_way_latency_value())
                 await sleep(max(0, apply_time - get_current_ts()))
                 if self.role is not Role.SECONDARY:
                     # Elected while waiting.
                     continue
 
                 self._update_commit_index(commit_index)
-                lag = get_current_ts() - entry.ts
+                lag = get_current_ts() - entry.created_at_absolute_ts
                 _logger.debug(
                     f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
-                # Update entry's local_ts, for tracking leases.
-                self.log.append(entry.copy_with_local_ts(self.clock.now()))
+                self.log.append(entry.copy())
                 self.match_index[self.node_id] = len(self.log) - 1
                 self.network.send(self.node_id,
                                   sync_source.update_secondary_position,
@@ -404,7 +400,6 @@ class Node:
         _logger.info(f"{self} running for election in term {self.current_term}")
         self._reset_election_deadline()
         self.voted_for[self.current_term] = self.node_id
-        self.last_voted_ts = self.clock.now()
         self.votes_received[self.current_term] = set([self.node_id])
         for node in self.nodes.values():
             if node is not self:
@@ -419,7 +414,6 @@ class Node:
                      last_log_term: int) -> None:
         """I'm a voter, receiving a candidate's RequestVote message."""
         granted = True
-        warn = False  # Warn candidate against using inherited lease?
         if term < self.current_term:
             granted = False
             logging.debug(f"{self} voting against {candidate_id}, stale term {term}")
@@ -443,11 +437,7 @@ class Node:
             logging.debug(f"{self} voting against {candidate_id}, my log is longer")
 
         if granted:
-            now = self.clock.now()
-            warn = now - self.last_voted_ts <= self.lease_timeout
-            self.last_voted_ts = now
-            logging.debug(f"{self} voting for {candidate_id},"
-                          f" warn_against_inherited_lease={warn}")
+            logging.debug(f"{self} voting for {candidate_id}")
             self.voted_for[term] = candidate_id
             self._reset_election_deadline()
 
@@ -455,17 +445,11 @@ class Node:
                           self.nodes[candidate_id].receive_vote,
                           voter_id=self.node_id,
                           term=self.current_term,
-                          vote_granted=granted,
-                          warn_against_inherited_lease=warn)
+                          vote_granted=granted)
 
-    def receive_vote(self,
-                     voter_id: int,
-                     term: int,
-                     vote_granted: bool,
-                     warn_against_inherited_lease) -> None:
+    def receive_vote(self, voter_id: int, term: int, vote_granted: bool) -> None:
         """I'm a candidate, receiving a yes or no vote."""
-        logging.debug(f"{self} received {vote_granted} vote from {voter_id},"
-                      f" warn_against_inherited_lease={warn_against_inherited_lease}")
+        logging.debug(f"{self} received {vote_granted} vote from {voter_id}")
         if term > self.current_term:
             self.current_term = term
             # Delayed vote reply reveals that we've been superseded.
@@ -474,15 +458,10 @@ class Node:
                 self.stepdown()
         elif term == self.current_term and vote_granted and self.role is Role.SECONDARY:
             self.votes_received[term].add(voter_id)
-            if warn_against_inherited_lease:
-                self.warned_in_term[term] = True
             if len(self.votes_received[term]) > len(self.nodes) / 2:
                 self.role = Role.PRIMARY
-                logging.info(
-                    f"{self} elected in term {self.current_term},"
-                    f" {'' if self.warned_in_term[term] else 'NOT '}warned against"
-                    f" inherited lease")
-                if self.inherit_lease_enabled and not self.warned_in_term[term]:
+                logging.info(f"{self} elected in term {self.current_term}")
+                if self.inherit_lease_enabled:
                     assert not self.log or self.log[-1].term < term
                     logging.debug(
                         f"Limbo region {self.commit_index} to {len(self.log) - 1}")
@@ -555,18 +534,16 @@ class Node:
         if self.role is not Role.PRIMARY:
             return False
 
-        lease_timeout_with_slop = self.lease_timeout * (1 + self.clock.max_clock_error)
-        lease_start = self.clock.now() - lease_timeout_with_slop
-        if (for_writes
-            or not self.inherit_lease_enabled
-            or self.warned_in_term[self.current_term]):
-            # Wait for past leader's lease to expire.
+        if for_writes or not self.inherit_lease_enabled:
+            # Wait for past leader's lease to expire. Compensate for max_clock_error.
             prior_entry = next(
                 (e for e in reversed(self.log) if e.term != self.current_term), None)
 
-            if prior_entry and prior_entry.local_ts >= lease_start:
-                # Previous leader still has write lease.
-                return False
+            if prior_entry:
+                age = self.clock.now() - prior_entry.ts
+                if age <= self.lease_timeout + self.clock.max_clock_error:
+                    # Previous leader still has write lease.
+                    return False
         else:
             if self.commit_index == -1:
                 return False
@@ -574,9 +551,9 @@ class Node:
             # Raft guarantees this, but not MongoDB. We follow Raft in this case.
             assert self.commit_index < len(self.log)
             # "Inherited read lease" means this primary can serve reads before it gets a
-            # lease, while a prior primary's lease is valid.
-            if self.log[self.commit_index].local_ts < lease_start:
-                # My newest committed entry is before lease timeout.
+            # lease, while a prior primary's lease is valid. No max_clock_error here.
+            age = self.clock.now() - self.log[self.commit_index].ts
+            if age > self.lease_timeout:
                 return False
 
         return True
@@ -587,7 +564,11 @@ class Node:
             raise Exception("Not primary")
 
         now = self.clock.now()
-        w = Write(key=key, value=value, term=self.current_term, ts=now, local_ts=now)
+        w = Write(key=key,
+                  value=value,
+                  term=self.current_term,
+                  ts=now,
+                  created_at_absolute_ts=get_current_ts())
         self.log.append(w)
         self.match_index[self.node_id] = len(self.log) - 1
 
