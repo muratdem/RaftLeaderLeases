@@ -1,1 +1,641 @@
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" version="1.1" width="423.28650051679165" height="565.5095903824952"><desc>box%20over%20Leader%3AcommitIndex%3D1%0Aspace%20-2.4%0ALeader-%3EFollower%201%3AAppendEntries%5CnleaderCommit%3D1%0Aspace%20-2.6%0ALeader-%3E(1)Follower%202%3A%0Aspace%20-2%0Abox%20over%20Follower%201%2CFollower%202%3AcommitIndex%3D1%0Aspace%20-3%0AFollower%201-%3E(1)Leader%3Aacknowledge%0Aspace%20-3%0AFollower%202-%3E(0)Leader%3Aacknowledge%0Abox%20over%20Leader%3AcommitIndex%3D2%0Aspace%20-2.4%0ALeader-%3EFollower%201%3AAppendEntries%5CnleaderCommit%3D2%0Aspace%20-2.6%0ALeader-%3E(1)Follower%202%3A%0Aspace%20-2%0Abox%20over%20Follower%201%2CFollower%202%3AcommitIndex%3D2%0Aspace%20-4.5</desc><defs/><g><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g/><g><rect fill="white" stroke="none" x="0" y="0" width="423" height="565"/></g><g/><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 83.33126807611329 59.284222437999986 L 83.33126807611329 565.5095903824952" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray="13.532121076923076,5.863919133333333"/><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 238.20250578633465 59.284222437999986 L 238.20250578633465 565.5095903824952" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray="13.532121076923076,5.863919133333333"/><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 361.59183560663934 59.284222437999986 L 361.59183560663934 565.5095903824952" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray="13.532121076923076,5.863919133333333"/></g><g><path fill="none" stroke="none"/><g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 41.4203129816836 11.786477457999997 L 125.24222317054299 11.786477457999997 L 125.24222317054299 59.284222437999986 L 41.4203129816836 59.284222437999986 L 41.4203129816836 11.786477457999997 Z" stroke-miterlimit="10" stroke-width="2.814681184" stroke-dasharray=""/></g><g><g/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="60.5073697606836" y="41.692465037999995" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">Leader</text></g><path fill="none" stroke="none"/><g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 185.30371957618232 11.786477457999997 L 291.101291996487 11.786477457999997 L 291.101291996487 59.284222437999986 L 185.30371957618232 59.284222437999986 L 185.30371957618232 11.786477457999997 Z" stroke-miterlimit="10" stroke-width="2.814681184" stroke-dasharray=""/></g><g><g/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="204.3907763551823" y="41.692465037999995" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">Follower 1</text></g><path fill="none" stroke="none"/><g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 308.69304939648697 11.786477457999997 L 414.49062181679164 11.786477457999997 L 414.49062181679164 59.284222437999986 L 308.69304939648697 59.284222437999986 L 308.69304939648697 11.786477457999997 Z" stroke-miterlimit="10" stroke-width="2.814681184" stroke-dasharray=""/></g><g><g/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="327.780106175487" y="41.692465037999995" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">Follower 2</text></g></g><g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 8.7958787 94.46773723799997 L 157.86665745222658 94.46773723799997 L 157.86665745222658 134.92877925799996 L 8.7958787 134.92877925799996 L 8.7958787 94.46773723799997" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="33.42433906000001" y="119.09619759799997" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">commitIndex=1</text></g><g><rect fill="white" stroke="none" x="104.14818099944661" y="145.48383369799996" width="101.44784582351562" height="22.86928462"/><rect fill="white" stroke="none" x="104.14818099944661" y="163.07559109799996" width="113.23741186355468" height="22.86928462"/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="106.7869446094466" y="161.31641535799997" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">AppendEntries</text><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="106.7869446094466" y="178.90817275799998" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">leaderCommit=1</text></g><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 83.33126807611329 185.94487571799993 L 223.71862552700134 185.94487571799993" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g transform="translate(238.20250578633465,185.94487571799993) translate(-238.20250578633465,-185.94487571799993)"><path fill="black" stroke="none" paint-order="stroke fill markers" d=" M 223.54270795300133 178.61497680133326 L 238.20250578633465 185.94487571799993 L 223.54270795300133 193.2747746346666 Z"/></g></g><g><rect fill="white" stroke="none" x="219.8227882313763" y="192.98157867799992" width="5.27752722" height="22.86928462"/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="222.46155184137632" y="208.81416033799994" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve"/></g><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 83.33126807611329 207.05498459799992 L 347.13681363648277 223.73288905085977" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g transform="translate(361.59183560663934,224.64674199799992) rotate(3.6174504665541733,0,0) translate(-361.59183560663934,-224.64674199799992)"><path fill="black" stroke="none" paint-order="stroke fill markers" d=" M 346.932037773306 217.31684308133325 L 361.59183560663934 224.64674199799992 L 346.932037773306 231.9766409146666 Z"/><g transform="rotate(-3.6174504665541733,0,0)"/></g></g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 222.36992412633467 242.23849939799993 L 377.42441726663935 242.23849939799993 L 377.42441726663935 282.6995414179999 L 222.36992412633467 282.6995414179999 L 222.36992412633467 242.23849939799993" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="249.99024168037374" y="266.8669597579999" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">commitIndex=1</text></g><g><rect fill="white" stroke="none" x="115.34002212493489" y="282.6995414179999" width="90.85372961257812" height="22.86928462"/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="117.97878573493489" y="298.5321230779999" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">acknowledge</text></g><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 238.20250578633465 301.6332293824953 L 97.72260314483934 317.59028121072964" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g transform="translate(83.33126807611329,319.2249867824953) rotate(-6.480426818782111,0,0) translate(-83.33126807611329,-319.2249867824953)"><path fill="black" stroke="none" paint-order="stroke fill markers" d=" M 97.99106590944662 311.89508786582866 L 83.33126807611329 319.2249867824953 L 97.99106590944662 326.55488569916196 Z"/><g transform="rotate(6.480426818782111,0,0)"/></g></g><g><rect fill="white" stroke="none" x="177.03468703508725" y="319.2249867824953" width="90.85372961257812" height="22.86928462"/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="179.67345064508726" y="335.0575684424953" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">acknowledge</text></g><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 361.59183560663934 342.0942714024953 L 97.81514833544662 342.0942714024953" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g transform="translate(83.33126807611329,342.0942714024953) translate(-83.33126807611329,-342.0942714024953)"><path fill="black" stroke="none" paint-order="stroke fill markers" d=" M 97.99106590944662 334.76437248582863 L 83.33126807611329 342.0942714024953 L 97.99106590944662 349.42417031916193 Z"/></g></g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 8.7958787 368.4819075024953 L 157.86665745222658 368.4819075024953 L 157.86665745222658 408.94294952249527 L 8.7958787 408.94294952249527 L 8.7958787 368.4819075024953" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="33.42433906000001" y="393.11036786249525" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">commitIndex=2</text></g><g><rect fill="white" stroke="none" x="104.14818099944661" y="419.49800396249526" width="101.44784582351562" height="22.86928462"/><rect fill="white" stroke="none" x="104.14818099944661" y="437.08976136249527" width="113.23741186355468" height="22.86928462"/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="106.7869446094466" y="435.3305856224953" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">AppendEntries</text><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="106.7869446094466" y="452.9223430224953" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">leaderCommit=2</text></g><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 83.33126807611329 459.95904598249524 L 223.71862552700134 459.95904598249524" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g transform="translate(238.20250578633465,459.95904598249524) translate(-238.20250578633465,-459.95904598249524)"><path fill="black" stroke="none" paint-order="stroke fill markers" d=" M 223.54270795300133 452.6291470658286 L 238.20250578633465 459.95904598249524 L 223.54270795300133 467.2889448991619 Z"/></g></g><g><rect fill="white" stroke="none" x="219.8227882313763" y="466.99574894249525" width="5.27752722" height="22.86928462"/><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="222.46155184137632" y="482.82833060249527" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve"/></g><g><path fill="none" stroke="black" paint-order="fill stroke markers" d=" M 83.33126807611329 481.0691548624952 L 347.13681363648277 497.74705931535505" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g transform="translate(361.59183560663934,498.66091226249523) rotate(3.6174504665541733,0,0) translate(-361.59183560663934,-498.66091226249523)"><path fill="black" stroke="none" paint-order="stroke fill markers" d=" M 346.932037773306 491.3310133458286 L 361.59183560663934 498.66091226249523 L 346.932037773306 505.9908111791619 Z"/><g transform="rotate(-3.6174504665541733,0,0)"/></g></g><path fill="white" stroke="black" paint-order="fill stroke markers" d=" M 222.36992412633467 516.2526696624951 L 377.42441726663935 516.2526696624951 L 377.42441726663935 556.7137116824952 L 222.36992412633467 556.7137116824952 L 222.36992412633467 516.2526696624951" stroke-miterlimit="10" stroke-width="1.4659797833333332" stroke-dasharray=""/><g><text fill="black" stroke="none" font-family="sans-serif" font-size="11pt" font-style="normal" font-weight="normal" text-decoration="normal" x="249.99024168037374" y="540.8811300224952" text-anchor="start" dominant-baseline="alphabetic" xml:space="preserve">commitIndex=2</text></g></g><g/><g/><g/></g></svg>
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   version="1.1"
+   width="384.24817043866665"
+   height="444.8661254654414"
+   id="svg71"
+   sodipodi:docname="Raft-sequencediagram.org.svg"
+   inkscape:version="1.3.2 (091e20e, 2023-11-25)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview71"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     showgrid="false"
+     inkscape:zoom="1.8837128"
+     inkscape:cx="191.90824"
+     inkscape:cy="222.43306"
+     inkscape:window-width="1728"
+     inkscape:window-height="1051"
+     inkscape:window-x="0"
+     inkscape:window-y="38"
+     inkscape:window-maximized="0"
+     inkscape:current-layer="g43" />
+  <desc
+     id="desc1">participantspacing%200%0Aentryspacing%200.1%0A%0Aboxstyle%20%3Csize%3A10%3E%0Amessagestyle%20%3Csize%3A10%3E%0A%0Afontfamily%20Serif%0A%0Aparticipant%20%22%3Csize%3A10%3ELeader%22%20as%20Leader%0Aparticipant%20%22%3Csize%3A10%3EFollower%201%22%20as%20Follower%201%0Aparticipant%20%22%3Csize%3A10%3EFollower%202%22%20as%20Follower%202%0A%0Abox%20over%20Leader%3AcommitIndex%3D1%0ALeader-%3EFollower%201%3AAppendEntries%5CnleaderCommit%3D1%0ALeader-%3E(1)Follower%202%3A%0Aspace%200.2%0Abox%20over%20Follower%201%2CFollower%202%3AcommitIndex%3D1%0AFollower%201-%3E(1)Leader%3Aacknowledge%0AFollower%202-%3E(0)Leader%3Aacknowledge%0Aspace%200.2%0Abox%20over%20Leader%3AcommitIndex%3D2%0ALeader-%3EFollower%201%3AAppendEntries%5CnleaderCommit%3D2%0ALeader-%3E(1)Follower%202%3A%0Aspace%200.2%0Abox%20over%20Follower%201%2CFollower%202%3AcommitIndex%3D2%0Aspace%20-3.2</desc>
+  <defs
+     id="defs1" />
+  <g
+     id="g71">
+    <g
+       id="g1" />
+    <g
+       id="g2" />
+    <g
+       id="g3" />
+    <g
+       id="g4" />
+    <g
+       id="g5" />
+    <g
+       id="g6" />
+    <g
+       id="g7" />
+    <g
+       id="g8" />
+    <g
+       id="g9" />
+    <g
+       id="g10" />
+    <g
+       id="g11" />
+    <g
+       id="g12" />
+    <g
+       id="g13" />
+    <g
+       id="g14" />
+    <g
+       id="g15" />
+    <g
+       id="g16" />
+    <g
+       id="g17" />
+    <g
+       id="g18" />
+    <g
+       id="g19" />
+    <g
+       id="g20" />
+    <g
+       id="g21" />
+    <g
+       id="g22" />
+    <g
+       id="g23" />
+    <g
+       id="g24" />
+    <g
+       id="g25" />
+    <g
+       id="g26" />
+    <g
+       id="g27" />
+    <g
+       id="g28" />
+    <g
+       id="g29" />
+    <g
+       id="g30" />
+    <g
+       id="g31">
+      <rect
+         fill="white"
+         stroke="none"
+         x="0"
+         y="0"
+         width="384"
+         height="444"
+         id="rect30" />
+    </g>
+    <g
+       id="g32" />
+    <g
+       id="g34">
+      <path
+         fill="none"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 76.05361152093751 59.284222437999986 L 76.05361152093751 444.8661254654414"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray="13.532121076923076,5.863919133333333"
+         id="path32" />
+      <path
+         fill="none"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 213.4044940065495 59.284222437999986 L 213.4044940065495 444.8661254654414"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray="13.532121076923076,5.863919133333333"
+         id="path33" />
+      <path
+         fill="none"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 327.3002782946276 59.284222437999986 L 327.3002782946276 444.8661254654414"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray="13.532121076923076,5.863919133333333"
+         id="path34" />
+    </g>
+    <g
+       id="g42">
+      <path
+         fill="none"
+         stroke="none"
+         id="path35" />
+      <g
+         id="g36">
+        <path
+           fill="white"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 38.46859179027735 15.526439388363624 L 113.63863125159767 15.526439388363624 L 113.63863125159767 59.284222437999986 L 38.46859179027735 59.284222437999986 L 38.46859179027735 15.526439388363624 Z"
+           stroke-miterlimit="10"
+           stroke-width="2.814681184"
+           stroke-dasharray=""
+           id="path36" />
+      </g>
+      <g
+         id="g37">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="57.55564856927735"
+           y="42.51493681254544"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text36">Leader</text>
+      </g>
+      <path
+         fill="none"
+         stroke="none"
+         id="path37" />
+      <g
+         id="g38">
+        <path
+           fill="white"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 165.25248056251044 15.526439388363624 L 261.5565074505886 15.526439388363624 L 261.5565074505886 59.284222437999986 L 165.25248056251044 59.284222437999986 L 165.25248056251044 15.526439388363624 Z"
+           stroke-miterlimit="10"
+           stroke-width="2.814681184"
+           stroke-dasharray=""
+           id="path38" />
+      </g>
+      <g
+         id="g39">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="184.33953734151044"
+           y="42.51493681254544"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           id="text38"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none">Follower 1</text>
+      </g>
+      <path
+         fill="none"
+         stroke="none"
+         id="path39" />
+      <g
+         id="g40">
+        <path
+           fill="white"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 279.14826485058853 15.526439388363624 L 375.45229173866664 15.526439388363624 L 375.45229173866664 59.284222437999986 L 279.14826485058853 59.284222437999986 L 279.14826485058853 15.526439388363624 Z"
+           stroke-miterlimit="10"
+           stroke-width="2.814681184"
+           stroke-dasharray=""
+           id="path40" />
+      </g>
+      <g
+         id="g41">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="298.23532162958855"
+           y="42.51493681254544"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text40">Follower 2</text>
+      </g>
+    </g>
+    <g
+       id="g70">
+      <path
+         fill="white"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 8.7958787 70.71886474799999 L 143.311344341875 70.71886474799999 L 143.311344341875 107.61586241163636 L 8.7958787 107.61586241163636 L 8.7958787 70.71886474799999"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray=""
+         id="path42" />
+      <g
+         id="g43">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="33.42433906000001"
+           y="92.87990978436362"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text42">commitIndex=1</text>
+      </g>
+      <g
+         id="g45">
+        <rect
+           fill="white"
+           stroke="none"
+           x="97.05900755927082"
+           y="110.25462602163634"
+           width="84.86094917359375"
+           height="19.305240263636364"
+           id="rect43" />
+        <rect
+           fill="white"
+           stroke="none"
+           x="97.05900755927082"
+           y="125.10481083981817"
+           width="95.34009040894531"
+           height="19.305240263636364"
+           id="rect44" />
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="99.50928805427083"
+           y="123.61979235799997"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text44">AppendEntries</text>
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="99.50928805427083"
+           y="138.4699771761818"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text45">leaderCommit=1</text>
+      </g>
+      <g
+         id="g47">
+        <path
+           fill="none"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 76.05361152093751 144.41005110345452 L 198.92061374721618 144.41005110345452"
+           stroke-miterlimit="10"
+           stroke-width="1.4659797833333332"
+           stroke-dasharray=""
+           id="path45" />
+        <g
+           transform="translate(213.4044940065495,144.41005110345452) translate(-213.4044940065495,-144.41005110345452)"
+           id="g46">
+          <path
+             fill="black"
+             stroke="none"
+             paint-order="stroke fill markers"
+             d=" M 198.74469617321617 137.08015218678784 L 213.4044940065495 144.41005110345452 L 198.74469617321617 151.7399500201212 Z"
+             id="path46" />
+        </g>
+      </g>
+      <g
+         id="g48" />
+      <g
+         id="g51">
+        <path
+           fill="none"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 76.05361152093751 157.55817627709087 L 312.8517716545147 174.1382799629578"
+           stroke-miterlimit="10"
+           stroke-width="1.4659797833333332"
+           stroke-dasharray=""
+           id="path48" />
+        <g
+           transform="translate(327.3002782946276,175.14993367709087) rotate(4.005192037605536,0,0) translate(-327.3002782946276,-175.14993367709087)"
+           id="g50">
+          <path
+             fill="black"
+             stroke="none"
+             paint-order="stroke fill markers"
+             d=" M 312.64048046129426 167.8200347604242 L 327.3002782946276 175.14993367709087 L 312.64048046129426 182.47983259375755 Z"
+             id="path49" />
+          <g
+             transform="rotate(-4.005192037605536,0,0)"
+             id="g49" />
+        </g>
+      </g>
+      <path
+         fill="white"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 197.5719123465495 183.94581237709085 L 343.13285995462763 183.94581237709085 L 343.13285995462763 220.84281004072722 L 197.5719123465495 220.84281004072722 L 197.5719123465495 183.94581237709085"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray=""
+         id="path51" />
+      <g
+         id="g52">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="227.7231136896511"
+           y="206.10685741345452"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text51">commitIndex=1</text>
+      </g>
+      <g
+         id="g53">
+        <rect
+           fill="white"
+           stroke="none"
+           x="107.11831847235676"
+           y="223.48157365072723"
+           width="75.22146858277344"
+           height="19.305240263636364"
+           id="rect52" />
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="109.56859896735676"
+           y="236.84673998709087"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text52">acknowledge</text>
+      </g>
+      <g
+         id="g56">
+        <path
+           fill="none"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 213.4044940065495 238.4942493690778 L 90.42013530991929 254.2459574253572"
+           stroke-miterlimit="10"
+           stroke-width="1.4659797833333332"
+           stroke-dasharray=""
+           id="path53" />
+        <g
+           transform="translate(76.05361152093751,256.0860067690778) rotate(-7.298647089725128,0,0) translate(-76.05361152093751,-256.0860067690778)"
+           id="g55">
+          <path
+             fill="black"
+             stroke="none"
+             paint-order="stroke fill markers"
+             d=" M 90.71340935427084 248.75610785241113 L 76.05361152093751 256.0860067690778 L 90.71340935427084 263.41590568574446 Z"
+             id="path54" />
+          <g
+             transform="rotate(7.298647089725128,0,0)"
+             id="g54" />
+        </g>
+      </g>
+      <g
+         id="g57">
+        <rect
+           fill="white"
+           stroke="none"
+           x="164.06621061639586"
+           y="258.72477037907777"
+           width="75.22146858277344"
+           height="19.305240263636364"
+           id="rect56" />
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="166.51649111139585"
+           y="272.0899367154414"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text56">acknowledge</text>
+      </g>
+      <g
+         id="g59">
+        <path
+           fill="none"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 327.3002782946276 278.03001064271416 L 90.53749178027084 278.03001064271416"
+           stroke-miterlimit="10"
+           stroke-width="1.4659797833333332"
+           stroke-dasharray=""
+           id="path57" />
+        <g
+           transform="translate(76.05361152093751,278.03001064271416) translate(-76.05361152093751,-278.03001064271416)"
+           id="g58">
+          <path
+             fill="black"
+             stroke="none"
+             paint-order="stroke fill markers"
+             d=" M 90.71340935427084 270.7001117260475 L 76.05361152093751 278.03001064271416 L 90.71340935427084 285.3599095593808 Z"
+             id="path58" />
+        </g>
+      </g>
+      <path
+         fill="white"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 8.7958787 286.82588934271416 L 143.311344341875 286.82588934271416 L 143.311344341875 323.7228870063505 L 8.7958787 323.7228870063505 L 8.7958787 286.82588934271416"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray=""
+         id="path59" />
+      <g
+         id="g60">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="33.42433906000001"
+           y="308.98693437907775"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text59">commitIndex=2</text>
+      </g>
+      <g
+         id="g62">
+        <rect
+           fill="white"
+           stroke="none"
+           x="97.05900755927082"
+           y="326.3616506163505"
+           width="84.86094917359375"
+           height="19.305240263636364"
+           id="rect60" />
+        <rect
+           fill="white"
+           stroke="none"
+           x="97.05900755927082"
+           y="341.21183543453236"
+           width="95.34009040894531"
+           height="19.305240263636364"
+           id="rect61" />
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="99.50928805427083"
+           y="339.72681695271416"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text61">AppendEntries</text>
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="99.50928805427083"
+           y="354.577001770896"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text62">leaderCommit=2</text>
+      </g>
+      <g
+         id="g64">
+        <path
+           fill="none"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 76.05361152093751 360.5170756981687 L 198.92061374721618 360.5170756981687"
+           stroke-miterlimit="10"
+           stroke-width="1.4659797833333332"
+           stroke-dasharray=""
+           id="path62" />
+        <g
+           transform="translate(213.4044940065495,360.5170756981687) translate(-213.4044940065495,-360.5170756981687)"
+           id="g63">
+          <path
+             fill="black"
+             stroke="none"
+             paint-order="stroke fill markers"
+             d=" M 198.74469617321617 353.18717678150205 L 213.4044940065495 360.5170756981687 L 198.74469617321617 367.84697461483535 Z"
+             id="path63" />
+        </g>
+      </g>
+      <g
+         id="g65" />
+      <g
+         id="g68">
+        <path
+           fill="none"
+           stroke="black"
+           paint-order="fill stroke markers"
+           d=" M 76.05361152093751 373.66520087180504 L 312.8517716545147 390.245304557672"
+           stroke-miterlimit="10"
+           stroke-width="1.4659797833333332"
+           stroke-dasharray=""
+           id="path65" />
+        <g
+           transform="translate(327.3002782946276,391.25695827180505) rotate(4.005192037605536,0,0) translate(-327.3002782946276,-391.25695827180505)"
+           id="g67">
+          <path
+             fill="black"
+             stroke="none"
+             paint-order="stroke fill markers"
+             d=" M 312.64048046129426 383.9270593551384 L 327.3002782946276 391.25695827180505 L 312.64048046129426 398.5868571884717 Z"
+             id="path66" />
+          <g
+             transform="rotate(-4.005192037605536,0,0)"
+             id="g66" />
+        </g>
+      </g>
+      <path
+         fill="white"
+         stroke="black"
+         paint-order="fill stroke markers"
+         d=" M 197.5719123465495 400.05283697180505 L 343.13285995462763 400.05283697180505 L 343.13285995462763 436.9498346354414 L 197.5719123465495 436.9498346354414 L 197.5719123465495 400.05283697180505"
+         stroke-miterlimit="10"
+         stroke-width="1.4659797833333332"
+         stroke-dasharray=""
+         id="path68" />
+      <g
+         id="g69">
+        <text
+           fill="black"
+           stroke="none"
+           font-family="Serif"
+           font-size="10pt"
+           font-style="normal"
+           font-weight="normal"
+           text-decoration="normal"
+           x="227.7231136896511"
+           y="422.21388200816864"
+           text-anchor="start"
+           dominant-baseline="alphabetic"
+           xml:space="preserve"
+           style="-inkscape-font-specification:CMU Serif;font-family:CMU Serif;font-weight:normal;font-style:normal;font-stretch:normal;font-variant:normal;font-size:13.3333px;font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;dominant-baseline:alphabetic;text-anchor:start;fill:#000000;stroke:none" id="text68">commitIndex=2</text>
+      </g>
+    </g>
+  </g>
+</svg>

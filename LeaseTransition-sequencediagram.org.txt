@@ -1,8 +1,21 @@
+participantspacing 0
+entryspacing 0.9
+
+boxstyle <size:10>
+messagestyle <size:10>
+
+fontfamily Serif
+
+participant "<size:10>Leader 1" as Leader 1
+participant "<size:10>Leader 2" as Leader 2
+space -2
 box over Leader 1:executes reads & writes
+space -2
 box over Leader 2:elected
+parallel
 box over Leader 1:<align:center>executes reads
-space -5.8
 box over Leader 2:<align:center>executes reads\n& stages writes
+parallel off
 box over Leader 1,Leader 2:<align:center>Leader 1's lease expires
 box over Leader 2:executes reads & writes
 space -4.6

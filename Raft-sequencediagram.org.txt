@@ -1,19 +1,26 @@
+participantspacing 0
+entryspacing 0.1
+
+boxstyle <size:10>
+messagestyle <size:10>
+
+fontfamily Serif
+
+participant "<size:10>Leader" as Leader
+participant "<size:10>Follower 1" as Follower 1
+participant "<size:10>Follower 2" as Follower 2
+
 box over Leader:commitIndex=1
-space -2.4
 Leader->Follower 1:AppendEntries\nleaderCommit=1
-space -2.6
 Leader->(1)Follower 2:
-space -2
+space 0.2
 box over Follower 1,Follower 2:commitIndex=1
-space -3
 Follower 1->(1)Leader:acknowledge
-space -3
 Follower 2->(0)Leader:acknowledge
+space 0.2
 box over Leader:commitIndex=2
-space -2.4
 Leader->Follower 1:AppendEntries\nleaderCommit=2
-space -2.6
 Leader->(1)Follower 2:
-space -2
+space 0.2
 box over Follower 1,Follower 2:commitIndex=2
-space -4.5
+space -3.2
