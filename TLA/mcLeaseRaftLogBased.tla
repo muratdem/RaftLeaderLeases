@@ -23,7 +23,7 @@ ServerAndKeySymmetry == Permutations(Server) \union Permutations(Key)
 \* Simple", 2005.
 
 ClockAbstractionView == LET
-    allTimes == UNION { UNION { log[s][i].timestamp : i \in 1..Len(log[s]) } : s \in Server }
+    allTimes == UNION { { log[s][i].timestamp : i \in 1..Len(log[s]) } : s \in Server }
     start == IF allTimes = {} THEN 0 ELSE Min(allTimes)
     normalizedLog == [
         s \in Server |-> [

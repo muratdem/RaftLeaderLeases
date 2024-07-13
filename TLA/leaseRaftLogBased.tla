@@ -14,9 +14,11 @@ VARIABLE currentTerm
 VARIABLE state
 VARIABLE log
 VARIABLE matchIndex
-VARIABLE committed
 VARIABLE commitIndex
 VARIABLE clock
+
+\* For invariant-checking:
+VARIABLE committed
 VARIABLE latestRead
 
 Entry == [term: Int, key: Key, index: Int, timestamp: Int]
