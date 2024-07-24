@@ -1,5 +1,5 @@
----- MODULE mcLeaseRaftLogBased ----
-EXTENDS TLC, leaseRaftLogBased
+---- MODULE mcLeaseGuard ----
+EXTENDS TLC, leaseGuard
 
 CONSTANTS MaxTerm, MaxLogLen, MaxClock
 
