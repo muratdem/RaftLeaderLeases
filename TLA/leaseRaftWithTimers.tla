@@ -13,13 +13,15 @@ VARIABLE committed, latestRead
 Entry == [term: Int, key: Key, index: Int]
 \* MongoDB-specific: leader tracks followers' terms.
 FollowerIndex == [term: Int, index: Int]
+\* For checking LeaderCompleteness.
+CommitRecord == [committedInTerm: Int, entry: Entry]
 TypeOK ==
     /\ currentTerm \in [Server -> Int]
     /\ state \in [Server -> {Leader, Follower}]
     /\ log \in [Server -> Seq(Entry)]
     /\ replicationTimes \in [Server -> Seq(Int)]
     /\ matchIndex \in [Server -> [Server -> FollowerIndex]]
-    /\ committed \in SUBSET Entry
+    /\ committed \in SUBSET CommitRecord
     /\ clock \in Int
     /\ commitIndex \in [Server -> Int]
     /\ latestRead \in [Key -> Entry]
@@ -35,11 +37,14 @@ CreateEntry(xterm, xkey, xindex) == [
   term |-> xterm, key |-> xkey, index |-> xindex]
 CreateFollowerIndex(xterm, xindex) == [
   term |-> xterm, index |-> xindex]
-FilterKey(S,k) == {e \in S: e.key=k}
+CreateCommitRecord(xterm, xentry) == [
+    committedInTerm |-> xterm, entry |-> xentry]
+FilterKey(S,k) == {commitRecord \in S: commitRecord.entry.key=k}
 MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0
   THEN CreateEntry(0, k, 0)
-  ELSE CHOOSE i \in FilterKey(S,k):
-  (\A j \in FilterKey(S,k): i.index >= j.index)
+  ELSE LET commitRecord == CHOOSE c \in FilterKey(S,k):
+    (\A j \in FilterKey(S,k): c.entry.index >= j.entry.index) IN 
+    commitRecord.entry
 
 \* Is log entry e in the log of node 'i'.
 InLog(e, i) == log[i][e.index] = e
@@ -192,19 +197,21 @@ CommitEntry(i) ==
       replicationTimes[i][index] + Delta < clock)
   \* Must have some entries to commit.
   /\ commitIndex[i] < Len(log[i]) 
-  /\ LET ind == commitIndex[i]+1
-       entry == log[i][ind] IN
-    \* The entry was written by this leader.
-    /\ entry.term = currentTerm[i]
-    \* Most nodes have this log entry. MongoDB checks the term, not Raft.
-    /\ \E q \in Quorums(Server) : \A s \in q :
-      /\ matchIndex[i][s].index >= ind
-      /\ matchIndex[i][s].term = currentTerm[i]
-    \* Don't mark an entry as committed more than once.
-    /\ entry \notin committed
-    /\ committed' = committed \cup {entry}
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
-    /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]     
+  /\ \E newCommitIdx \in (commitIndex[i]+1)..Len(log[i]) :
+    LET topNewCommitEntry == log[i][newCommitIdx]
+        newCommitRecords == {
+          CreateCommitRecord(currentTerm[i], log[i][x]) :
+            x \in Max({1, commitIndex[i]})..newCommitIdx} IN
+      \* The entry was written by this leader.
+      /\ topNewCommitEntry.term = currentTerm[i]
+      \* Most nodes have this log entry. MongoDB checks the term, not Raft.
+      /\ \E q \in Quorums(Server) : \A s \in q :
+        /\ matchIndex[i][s].index >= newCommitIdx
+        /\ matchIndex[i][s].term = currentTerm[i]
+      /\ committed' = committed \cup newCommitRecords
+      /\ commitIndex' = [commitIndex EXCEPT ![i] = newCommitIdx]
+      \* Maintain LinearizableReads invariant. ClientRead might still break it.
+      /\ latestRead' = [k \in Key |-> MaxCommitted(committed', k)]
   /\ UNCHANGED <<currentTerm, replicationTimes, matchIndex, state, log, clock>>
 
 \* Exchanges terms between two nodes and step down the Leader if needed.
@@ -284,12 +291,13 @@ LogMatching ==
 \* A Leader has all entries committed in prior terms
 LeaderCompleteness ==
   \A s \in Server : (state[s] = Leader) =>
-    \A c \in committed : (
-      c.term < currentTerm[s] => InLog(c, s))
+    \A r \in committed : (
+      r.committedInTerm < currentTerm[s] => InLog(r.entry, s))
 
 \* Two entries committed at same index are same entry.
 StateMachineSafety ==
-  \A c1, c2 \in committed : (c1.index = c2.index) => (c1 = c2)
+  \A c1, c2 \in committed : 
+    (c1.entry.index = c2.entry.index) => (c1.entry = c2.entry)
 
 \* For all k, latestRead for k is last committed write to k.
 LinearizableReads == 
