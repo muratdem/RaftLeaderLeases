@@ -11,12 +11,14 @@ VARIABLE clock
 VARIABLE committed, latestRead
 
 Entry == [term: Int, key: Key, index: Int]
+\* MongoDB-specific: leader tracks followers' terms.
+FollowerIndex == [term: Int, index: Int]
 TypeOK ==
     /\ currentTerm \in [Server -> Int]
     /\ state \in [Server -> {Leader, Follower}]
     /\ log \in [Server -> Seq(Entry)]
     /\ replicationTimes \in [Server -> Seq(Int)]
-    /\ matchIndex \in [Server -> [Server -> Int]]
+    /\ matchIndex \in [Server -> [Server -> FollowerIndex]]
     /\ committed \in SUBSET Entry
     /\ clock \in Int
     /\ commitIndex \in [Server -> Int]
@@ -31,6 +33,8 @@ Min(S) == CHOOSE i \in S: (\A j \in S: i=<j)
 Range(f) == {f[x]: x \in DOMAIN f}
 CreateEntry(xterm, xkey, xindex) == [
   term |-> xterm, key |-> xkey, index |-> xindex]
+CreateFollowerIndex(xterm, xindex) == [
+  term |-> xterm, index |-> xindex]
 FilterKey(S,k) == {e \in S: e.key=k}
 MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0
   THEN CreateEntry(0, k, 0)
@@ -90,11 +94,11 @@ ClientWrite(i, k) ==
     log[i], CreateEntry(currentTerm[i], k, Len(log[i]) + 1))]
   /\ replicationTimes' = [
     replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock)]
-  /\ matchIndex' = [
-    matchIndex EXCEPT ![i] = [
-        s \in Server |-> IF s=i THEN Len(log[i])+1 ELSE matchIndex[i][s]]]
-  /\ UNCHANGED <<currentTerm, state, committed, commitIndex,
-                 latestRead, clock>>
+  /\ matchIndex' = [matchIndex EXCEPT ![i] = [s \in Server |->
+      IF s=i
+      THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1) 
+      ELSE matchIndex[i][s]]]
+  /\ UNCHANGED <<currentTerm, state, committed, commitIndex, latestRead, clock>>
 
 \* Node i reads key k.
 ClientRead(i, k) ==
@@ -133,9 +137,10 @@ GetEntries(i, j) ==
         /\ log' = [log EXCEPT ![i] = newLog]
         /\ replicationTimes' = [replicationTimes EXCEPT ![i] = newReplTimes]
         \* Update source's matchIndex immediately & reliably (unrealistic).
-        /\ matchIndex' = [
-            matchIndex EXCEPT ![j] = [
-              s \in Server |-> IF s=i THEN Len(log[i])+1 ELSE matchIndex[j][s]]]
+        /\ matchIndex' = [matchIndex EXCEPT ![j] = [s \in Server |-> 
+          IF s=i 
+          THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1) 
+          ELSE matchIndex[j][s]]]
         \* Raft clamps commitIndex to log length, MongoDB doesn't.
         /\ commitIndex' = [
             commitIndex EXCEPT ![i] = Max({commitIndex[i], commitIndex[j]})]
@@ -149,8 +154,10 @@ RollbackEntries(i, j) ==
   /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
   /\ replicationTimes' = [replicationTimes EXCEPT ![i] = SubSeq(
     replicationTimes[i], 1, Len(log[i])-1)]
-  /\ matchIndex' = [matchIndex EXCEPT ![i] = [
-    s \in Server |-> IF s=i THEN Len(log[i])-1 ELSE matchIndex[i][s]]]
+  /\ matchIndex' = [matchIndex EXCEPT ![i] = [s \in Server |->
+    IF s=i
+    THEN CreateFollowerIndex(currentTerm[i], Len(log[i])-1)
+    ELSE matchIndex[i][s]]]
   /\ currentTerm' = [currentTerm EXCEPT ![i] = Max(
     {currentTerm[i], currentTerm[j]})]
   /\ UNCHANGED <<committed, commitIndex, state, clock,
@@ -165,8 +172,9 @@ BecomeLeader(i, voteQuorum) ==
   /\ currentTerm' = [s \in Server |->
     IF s \in voteQuorum THEN t ELSE currentTerm[s]]
   \* Reset my matchIndex.
-  /\ matchIndex' = [matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
-   \* All voters become followers.
+  /\ matchIndex' = [matchIndex EXCEPT ![i] = [
+    j \in Server |-> CreateFollowerIndex(0, 0)]]
+  \* All voters become followers.
   /\ state' = [s \in Server |->
           IF s = i THEN Leader
           ELSE IF s \in voteQuorum THEN Follower
@@ -188,10 +196,10 @@ CommitEntry(i) ==
        entry == log[i][ind] IN
     \* The entry was written by this leader.
     /\ entry.term = currentTerm[i]
-    \* Most nodes have this log entry. MongoDB checks most nodes have our term,
-    \* not Raft. We check other nodes' terms directly (unrealistic).
-    /\ \E q \in Quorums(Server) :
-      \A s \in q : matchIndex[i][s] >= ind /\ currentTerm[s] = currentTerm[i]
+    \* Most nodes have this log entry. MongoDB checks the term, not Raft.
+    /\ \E q \in Quorums(Server) : \A s \in q :
+      /\ matchIndex[i][s].index >= ind
+      /\ matchIndex[i][s].term = currentTerm[i]
     \* Don't mark an entry as committed more than once.
     /\ entry \notin committed
     /\ committed' = committed \cup {entry}
@@ -228,7 +236,8 @@ Init ==
   /\ state = [i \in Server |-> Follower]
   /\ log = [i \in Server |-> <<>>]
   /\ replicationTimes = [i \in Server |-> <<>>]
-  /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
+  /\ matchIndex = [i \in Server |-> [
+    j \in Server |-> CreateFollowerIndex(0, 0)]]
   /\ committed = {}
   /\ commitIndex = [i \in Server |-> 0]
   /\ clock = 0
