@@ -10,12 +10,16 @@ VARIABLE clock
 \* For invariant-checking:
 VARIABLE committed, latestRead
 Entry == [term: Int, key: Key, index: Int, timestamp: Int]
+\* MongoDB-specific: leader tracks followers' terms.
+FollowerIndex == [term: Int, index: Int]
+\* For checking LeaderCompleteness.
+CommitRecord == [committedInTerm: Int, entry: Entry]
 TypeOK ==
     /\ currentTerm \in [Server -> Int]
     /\ state \in [Server -> {Leader, Follower}]
     /\ log \in [Server -> Seq(Entry)]
-    /\ matchIndex \in [Server -> [Server -> Int]]
-    /\ committed \in SUBSET Entry
+    /\ matchIndex \in [Server -> [Server -> FollowerIndex]]
+    /\ committed \in SUBSET CommitRecord
     /\ clock \in Int
     /\ commitIndex \in [Server -> Int]
     /\ latestRead \in [Key -> Entry]
@@ -30,11 +34,16 @@ Range(f) == {f[x]: x \in DOMAIN f}
 CreateEntry(xterm, xkey, xindex, xtimestamp) == [
   term |-> xterm, key |-> xkey,
   index |-> xindex, timestamp |-> xtimestamp]
-FilterKey(S,k) == {e \in S: e.key=k}
+CreateFollowerIndex(xterm, xindex) == [
+  term |-> xterm, index |-> xindex]
+CreateCommitRecord(xterm, xentry) == [
+    committedInTerm |-> xterm, entry |-> xentry]
+FilterKey(S,k) == {commitRecord \in S: commitRecord.entry.key=k}
 MaxCommitted(S, k) == IF Cardinality(FilterKey(S,k)) = 0
   THEN CreateEntry(0, k, 0, -1)
-  ELSE CHOOSE i \in FilterKey(S,k):
-  (\A j \in FilterKey(S,k): i.index >= j.index)
+  ELSE LET commitRecord == CHOOSE c \in FilterKey(S,k):
+    (\A j \in FilterKey(S,k): c.entry.index >= j.entry.index) IN 
+    commitRecord.entry
 
 \* Is log entry e in the log of node 'i'.
 InLog(e, i) == log[i][e.index] = e
@@ -95,9 +104,10 @@ ClientWrite(i, k) ==
   /\ clock' = clock + 1
   /\ log' = [log EXCEPT ![i] = Append(log[i], CreateEntry(
     currentTerm[i], k, Len(log[i]) + 1, clock'))]
-  /\ matchIndex' = [matchIndex EXCEPT ![i] = [
-    s \in Server |-> 
-      IF s=i THEN Len(log[i])+1 ELSE matchIndex[i][s]]]
+  /\ matchIndex' = [matchIndex EXCEPT ![i] = [s \in Server |->
+      IF s=i
+      THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1)
+      ELSE matchIndex[i][s]]]
   /\ UNCHANGED <<currentTerm, state, committed, commitIndex,
                  latestRead>>
 
@@ -140,11 +150,11 @@ GetEntries(i, j) ==
         newLog    == Append(log[i], newEntry) IN
         /\ log' = [log EXCEPT ![i] = newLog]
         \* Update source's matchIndex immediately & reliably (unrealistic).
-        /\ matchIndex' = [
-            matchIndex EXCEPT ![j] = [
-              s \in Server |->
-                IF s=i THEN Len(log[i])+1 ELSE matchIndex[j][s]]]
-        /\ commitIndex' = [commitIndex EXCEPT ![i] = 
+        /\ matchIndex' = [matchIndex EXCEPT ![j] = [s \in Server |->
+          IF s=i
+          THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1)
+          ELSE matchIndex[j][s]]]
+        /\ commitIndex' = [commitIndex EXCEPT ![i] =
           IF commitIndex[i] < commitIndex[j]
           THEN Min ({commitIndex[j], Len(newLog)})
           ELSE commitIndex[i]]   
@@ -156,9 +166,10 @@ RollbackEntries(i, j) ==
   /\ CanRollback(i, j)
   \* Roll back one log entry.
   /\ log' = [log EXCEPT ![i] = SubSeq(log[i], 1, Len(log[i])-1)]
-  /\ matchIndex' = [matchIndex EXCEPT ![i] = [
-    s \in Server |->
-        IF s=i THEN Len(log[i])-1 ELSE matchIndex[i][s]]]
+  /\ matchIndex' = [matchIndex EXCEPT ![i] = [s \in Server |->
+    IF s=i
+    THEN CreateFollowerIndex(currentTerm[i], Len(log[i])-1)
+    ELSE matchIndex[i][s]]]
   /\ currentTerm' = [currentTerm EXCEPT ![i] = Max(
     {currentTerm[i], currentTerm[j]})]
   /\ UNCHANGED <<committed, commitIndex, state, clock,
@@ -173,8 +184,8 @@ BecomeLeader(i, voteQuorum) ==
   /\ currentTerm' = [s \in Server |->
     IF s \in voteQuorum THEN t ELSE currentTerm[s]]
   \* Reset my matchIndex.
-  /\ matchIndex' = [
-    matchIndex EXCEPT ![i] = [j \in Server |-> 0]]
+  /\ matchIndex' = [matchIndex EXCEPT ![i] = [
+    j \in Server |-> CreateFollowerIndex(0, 0)]]
    \* All voters become followers.
   /\ state' = [s \in Server |->
           IF s = i THEN Leader
@@ -193,20 +204,22 @@ CommitEntry(i) ==
       log[i][index].timestamp + Delta < clock)
   \* Must have some entries to commit.
   /\ commitIndex[i] < Len(log[i]) 
-  /\ LET ind == commitIndex[i]+1
-       entry == log[i][ind] IN
-    \* The entry was written by this leader.
-    /\ entry.term = currentTerm[i]
-    \* Most nodes have this log entry.
-    \* (MongoDB checks most nodes have our term, not Raft.)
-    /\ \E q \in Quorums(Server) :
-      \A s \in q : matchIndex[i][s] >= ind
-    \* Don't mark an entry as committed more than once.
-    /\ entry \notin committed
-    /\ committed' = committed \cup {entry}
-    /\ commitIndex' = [commitIndex EXCEPT ![i] = ind]
-    /\ latestRead' = [latestRead EXCEPT ![entry.key] = entry]     
-    /\ UNCHANGED <<currentTerm, matchIndex, state, log, clock>>
+  /\ \E newCommitIdx \in (commitIndex[i]+1)..Len(log[i]) :
+    LET topNewCommitEntry == log[i][newCommitIdx]
+        newCommitRecords == {
+          CreateCommitRecord(currentTerm[i], log[i][x]) :
+            x \in Max({1, commitIndex[i]})..newCommitIdx} IN
+      \* The entry was written by this leader.
+      /\ topNewCommitEntry.term = currentTerm[i]
+      \* Most nodes have this log entry. MongoDB checks the term, not Raft.
+      /\ \E q \in Quorums(Server) : \A s \in q :
+        /\ matchIndex[i][s].index >= newCommitIdx
+        /\ matchIndex[i][s].term = currentTerm[i]
+      /\ committed' = committed \cup newCommitRecords
+      /\ commitIndex' = [commitIndex EXCEPT ![i] = newCommitIdx]
+      \* Maintain LinearizableReads invariant. ClientRead might still break it.
+      /\ latestRead' = [k \in Key |-> MaxCommitted(committed', k)]
+  /\ UNCHANGED <<currentTerm, matchIndex, state, log, clock>>
 
 \* Exchanges terms between two nodes and step down the Leader if needed.
 UpdateTerms(i, j) ==
@@ -236,7 +249,8 @@ Init ==
   /\ currentTerm = [i \in Server |-> 0]
   /\ state = [i \in Server |-> Follower]
   /\ log = [i \in Server |-> <<>>]
-  /\ matchIndex = [i \in Server |-> [j \in Server |-> 0]]
+  /\ matchIndex = [i \in Server |-> [
+    j \in Server |-> CreateFollowerIndex(0, 0)]]
   /\ committed = {}
   /\ commitIndex = [i \in Server |-> 0]
   /\ clock = 0
@@ -279,12 +293,13 @@ LogMatching ==
 \* A Leader has all entries committed in prior terms
 LeaderCompleteness ==
   \A s \in Server : (state[s] = Leader) =>
-    \A c \in committed : (
-      c.term < currentTerm[s] => InLog(c, s))
+    \A r \in committed : (
+      r.committedInTerm < currentTerm[s] => InLog(r.entry, s))
 
 \* Two entries committed at same index are same entry.
 StateMachineSafety ==
-  \A c1, c2 \in committed : (c1.index = c2.index) => (c1 = c2)
+  \A c1, c2 \in committed :
+    (c1.entry.index = c2.entry.index) => (c1.entry = c2.entry)
 
 \* For all k, latestRead for k is last committed write to k.
 LinearizableReads == 
