@@ -30,7 +30,9 @@ vars == <<currentTerm, state, log, replicationTimes, matchIndex, commitIndex,
 
 Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j)
+MaxOr(S, default) == IF S = {} THEN default ELSE Max(S)
 Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
+MinOr(S, default) == IF S = {} THEN default ELSE Min(S)
 Range(f) == {f[x]: x \in DOMAIN f}
 CreateEntry(xterm, xkey, xindex) == [
   term |-> xterm, key |-> xkey, index |-> xindex]
@@ -50,13 +52,7 @@ InLog(e, i) == log[i][e.index] = e
 
 \* Find latest committed entry for key in log of i
 LastCommitted(k, i) == 
-  IF commitIndex[i] = 0 THEN 0
-  ELSE 
-    IF ~(\E j \in 1..commitIndex[i]: Len(log[i])>= j /\ log[i][j].key=k)
-      THEN 0
-      ELSE CHOOSE j \in 1..commitIndex[i]:
-        /\ log[i][j].key=k 
-        /\ \A l \in 1..commitIndex[i]: log[i][l].key=k => j>=l
+  MaxOr({j \in DOMAIN log[i] : j<=commitIndex[i] /\ log[i][j].key=k}, 0)
 
 \* The term of the last entry in a log, or 0 if the log is empty.
 LastTerm(xlog) ==

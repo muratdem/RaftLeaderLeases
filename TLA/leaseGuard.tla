@@ -29,7 +29,9 @@ vars == <<currentTerm, state, log, matchIndex, committed,
 
 Empty(s) == Len(s) = 0
 Max(S) == CHOOSE i \in S: (\A j \in S: i>=j)
+MaxOr(S, default) == IF S = {} THEN default ELSE Max(S)
 Min(S) == CHOOSE i \in S: (\A j \in S: i=<j) 
+MinOr(S, default) == IF S = {} THEN default ELSE Min(S)
 Range(f) == {f[x]: x \in DOMAIN f}
 CreateEntry(xterm, xkey, xindex, xtimestamp) == [
   term |-> xterm, key |-> xkey,
@@ -50,26 +52,13 @@ InLog(e, i) == log[i][e.index] = e
 
 \* Find latest committed entry for key in log of i
 LastCommitted(k, i) == 
-  IF commitIndex[i] = 0 THEN 0
-  ELSE 
-    \* Raft guarantees commitIndex[i] <= Len(log[i])
-    IF ~(\E j \in 1..commitIndex[i]: log[i][j].key=k)
-      THEN 0
-      ELSE CHOOSE j \in 1..commitIndex[i]:
-        /\ log[i][j].key=k 
-        /\ \A l \in 1..commitIndex[i]: log[i][l].key=k => j>=l
+  MaxOr({j \in DOMAIN log[i] : j<=commitIndex[i] /\ log[i][j].key=k}, 0)
 
 \* Find latest entry for key in log of i before i's current term
 LastInPriorTerm(k, i) == 
-  IF ~(\E j \in 1..Len(log[i]):
-    log[i][j].term<currentTerm[i] /\ log[i][j].key=k)
-  THEN 0
-  ELSE CHOOSE j \in 1..Len(log[i]):
-    /\ log[i][j].key=k
-    /\ log[i][j].term<currentTerm[i]
-    /\ \A l \in 1..Len(log[i]):
-      (log[i][l].key=k /\ log[i][l].term<currentTerm[i])
-        => j>=l
+  MaxOr({j \in DOMAIN log[i] : 
+           log[i][j].term<currentTerm[i] /\ log[i][j].key=k},
+        0)
 
 \* The term of the last entry in a log, or 0 if the log is empty.
 LastTerm(xlog) ==
