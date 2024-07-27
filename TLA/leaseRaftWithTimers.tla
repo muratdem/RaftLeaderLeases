@@ -2,9 +2,9 @@
 \* Raft with timer-based leases, no need for synchronized clocks. Includes
 \* deferred commit writes, but not inherited lease reads (the latter needs
 \* synced clocks.) Follows MongoDB, not Raft, where they differ.
-\* TODO: epsilon
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
-CONSTANTS Server, Key, Delta, Follower, Leader
+CONSTANTS Server, Key, Delta, Epsilon, Follower, Leader
+ASSUME Epsilon % 2 = 0
 VARIABLE currentTerm, state, log, replicationTimes, matchIndex, commitIndex
 VARIABLE clock
 \* For invariant-checking:
@@ -83,6 +83,8 @@ TermOfLastCommittedEntry(i) ==
   IF (Len(log[i]) = 0 \/ commitIndex[i] = 0) THEN 0
   ELSE log[i][Min({Len(log[i]), commitIndex[i]})].term
 
+LocalClockValues == (clock - (Epsilon \div 2))..(clock + (Epsilon \div 2))
+
 --------------------------------------------------------------------------------
 \* Next state actions.
 
@@ -92,8 +94,9 @@ ClientWrite(i, k) ==
   /\ state[i] = Leader
   /\ log' = [log EXCEPT ![i] = Append(
     log[i], CreateEntry(currentTerm[i], k, Len(log[i]) + 1))]
-  /\ replicationTimes' = [
-    replicationTimes EXCEPT ![i] = Append(replicationTimes[i], clock)]
+  /\ \E localClock \in LocalClockValues :
+    /\ replicationTimes' = [
+      replicationTimes EXCEPT ![i] = Append(replicationTimes[i], localClock)]
   /\ matchIndex' = [matchIndex EXCEPT ![i] = [s \in Server |->
       IF s=i
       THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1) 
@@ -107,13 +110,14 @@ ClientRead(i, k) ==
   /\ commitIndex[i] > 0
   \* SERVER-53813 (not fixed in MongoDB yet, but assume it is)
   /\ TermOfLastCommittedEntry(i) = currentTerm[i]
-  /\ replicationTimes[i][commitIndex[i]] + Delta >= clock
-  /\ LET cInd == LastCommitted(k, i) IN
-    /\ latestRead' = [latestRead EXCEPT ![k] = 
-              IF cInd = 0 THEN CreateEntry(0, k, 0)
-              ELSE log[i][cInd]]
-  /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex,
-                 committed, commitIndex, clock>>
+  /\ \E localClock \in LocalClockValues :
+    /\ replicationTimes[i][commitIndex[i]] + Delta - Epsilon - 1 > localClock
+    /\ LET cInd == LastCommitted(k, i) IN
+        /\ latestRead' = [latestRead EXCEPT ![k] = 
+          IF cInd = 0 THEN CreateEntry(0, k, 0)
+          ELSE log[i][cInd]]
+    /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex,
+                    committed, commitIndex, clock>>
 
 \* Node 'i' gets a new log entry from node 'j'.
 \* In Raft, j's term >= i's term. MongoDB doesn't require this, see
@@ -130,20 +134,21 @@ GetEntries(i, j) ==
             THEN TRUE
             ELSE log[j][Len(log[i])] = log[i][Len(log[i])] IN
      /\ logOk \* log consistency check
-     /\ LET newEntryIndex == IF Empty(log[i]) THEN 1 ELSE Len(log[i]) + 1
-            newEntry == log[j][newEntryIndex]
-            newLog == Append(log[i], newEntry)
-            newReplTimes == Append(replicationTimes[i], clock) IN
-        /\ log' = [log EXCEPT ![i] = newLog]
-        /\ replicationTimes' = [replicationTimes EXCEPT ![i] = newReplTimes]
-        \* Update source's matchIndex immediately & reliably (unrealistic).
-        /\ matchIndex' = [matchIndex EXCEPT ![j] = [s \in Server |-> 
-          IF s=i 
-          THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1) 
-          ELSE matchIndex[j][s]]]
-        \* Raft clamps commitIndex to log length, MongoDB doesn't.
-        /\ commitIndex' = [
-            commitIndex EXCEPT ![i] = Max({commitIndex[i], commitIndex[j]})]
+     /\ \E localClock \in LocalClockValues :
+       /\ LET newEntryIndex == IF Empty(log[i]) THEN 1 ELSE Len(log[i]) + 1
+              newEntry == log[j][newEntryIndex]
+              newLog == Append(log[i], newEntry)
+              newReplTimes == Append(replicationTimes[i], localClock) IN
+          /\ log' = [log EXCEPT ![i] = newLog]
+          /\ replicationTimes' = [replicationTimes EXCEPT ![i] = newReplTimes]
+          \* Update source's matchIndex immediately & reliably (unrealistic).
+          /\ matchIndex' = [matchIndex EXCEPT ![j] = [s \in Server |-> 
+            IF s=i 
+            THEN CreateFollowerIndex(currentTerm[i], Len(log[i])+1) 
+            ELSE matchIndex[j][s]]]
+          \* Raft clamps commitIndex to log length, MongoDB doesn't.
+          /\ commitIndex' = [
+              commitIndex EXCEPT ![i] = Max({commitIndex[i], commitIndex[j]})]
   /\ UNCHANGED <<committed, state, clock, latestRead>>
 
 \*  Node 'i' rolls back against the log of node 'j'.
@@ -160,8 +165,7 @@ RollbackEntries(i, j) ==
     ELSE matchIndex[i][s]]]
   /\ currentTerm' = [currentTerm EXCEPT ![i] = Max(
     {currentTerm[i], currentTerm[j]})]
-  /\ UNCHANGED <<committed, commitIndex, state, clock,
-                 latestRead>>
+  /\ UNCHANGED <<committed, commitIndex, state, clock, latestRead>>
 
 \* Node 'i' gets elected as a Leader.
 BecomeLeader(i, voteQuorum) ==
@@ -186,10 +190,11 @@ BecomeLeader(i, voteQuorum) ==
 CommitEntry(i) ==
   /\ state[i] = Leader
   /\ Len(log[i]) > 0
-  \* Last entry replicated from prior leader was at least Delta ago.
-  /\ \A index \in DOMAIN log[i] : 
-    log[i][index].term # currentTerm[i] => (
-      replicationTimes[i][index] + Delta < clock)
+  \* Last entry replicated from prior leader was more than Delta ago.
+  /\ \E localClock \in LocalClockValues : 
+    /\ \A index \in DOMAIN log[i] : 
+      log[i][index].term # currentTerm[i] => (
+        replicationTimes[i][index] + Delta < localClock)
   \* Must have some entries to commit.
   /\ commitIndex[i] < Len(log[i]) 
   /\ LET ind == commitIndex[i]+1
@@ -264,7 +269,7 @@ EntryIndexes ==
 
 LogAndReplicationTimesLengths ==
     \A s \in Server:
-        Len(log[s]) = Len(replicationTimes[s])
+      Len(log[s]) = Len(replicationTimes[s])
         
 OneLeaderPerTerm ==
   \A s,t \in Server :
