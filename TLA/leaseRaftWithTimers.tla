@@ -2,7 +2,6 @@
 \* Raft with timer-based leases, no need for synchronized clocks. Includes
 \* deferred commit writes, but not inherited lease reads (the latter needs
 \* synced clocks.) Follows MongoDB, not Raft, where they differ.
-\* TODO: epsilon
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
 CONSTANTS Server, Key, Delta, Follower, Leader
 VARIABLE currentTerm, state, log, replicationTimes, matchIndex, commitIndex
