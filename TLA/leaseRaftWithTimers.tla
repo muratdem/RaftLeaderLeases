@@ -3,7 +3,8 @@
 \* deferred commit writes, but not inherited lease reads (the latter needs
 \* synced clocks.) Follows MongoDB, not Raft, where they differ.
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC
-CONSTANTS Server, Key, Delta, Follower, Leader
+CONSTANTS Server, Key, Delta, Follower, Leader, ConsistencyLevel
+ASSUME ConsistencyLevel \in {"Linearizable", "ReadYourWrites"}
 VARIABLE currentTerm, state, log, replicationTimes, matchIndex, commitIndex
 VARIABLE clock
 \* For invariant-checking:
@@ -54,6 +55,10 @@ InLog(e, i) == log[i][e.index] = e
 LastCommitted(k, i) == 
   MaxOr({j \in DOMAIN log[i] : j<=commitIndex[i] /\ log[i][j].key=k}, 0)
 
+\* Find latest entry for key in log of i
+LastWritten(k, i) == 
+  MaxOr({j \in DOMAIN log[i] : log[i][j].key=k}, 0)
+
 \* The term of the last entry in a log, or 0 if the log is empty.
 LastTerm(xlog) ==
   IF Len(xlog) = 0 THEN 0 ELSE xlog[Len(xlog)].term
@@ -100,8 +105,9 @@ ClientWrite(i, k) ==
       ELSE matchIndex[i][s]]]
   /\ UNCHANGED <<currentTerm, state, committed, commitIndex, latestRead, clock>>
 
-\* Node i reads key k.
-ClientRead(i, k) ==
+\* Node i reads key k with readConcern: "majority".
+ClientReadMajority(i, k) ==
+  /\ ConsistencyLevel = "Linearizable"
   /\ state[i] = Leader
   /\ Len(log[i]) > 0
   /\ commitIndex[i] > 0
@@ -112,6 +118,20 @@ ClientRead(i, k) ==
     /\ latestRead' = [latestRead EXCEPT ![k] = 
               IF cInd = 0 THEN CreateEntry(0, k, 0)
               ELSE log[i][cInd]]
+  /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex,
+                 committed, commitIndex, clock>>
+
+\* Node i reads key k with readConcern: "local".
+ClientReadLocal(i, k) ==
+  /\ ConsistencyLevel = "ReadYourWrites"
+  /\ state[i] = Leader
+  /\ Len(log[i]) > 0
+  /\ commitIndex[i] > 0
+  /\ replicationTimes[i][commitIndex[i]] + Delta >= clock
+  /\ LET ind == LastWritten(k, i) IN
+    /\ latestRead' = [latestRead EXCEPT ![k] = 
+              IF ind = 0 THEN CreateEntry(0, k, 0)
+              ELSE log[i][ind]]
   /\ UNCHANGED <<currentTerm, state, log, replicationTimes, matchIndex,
                  committed, commitIndex, clock>>
 
@@ -247,7 +267,9 @@ Init ==
 
 Next ==
   \/ \E s \in Server : \E k \in Key : ClientWrite(s,k)
-  \/ \E s \in Server : \E k \in Key : ClientRead(s,k)
+  \* Either majority or local reads are enabled depending on ConsistencyLevel
+  \/ \E s \in Server : \E k \in Key : ClientReadMajority(s,k)
+  \/ \E s \in Server : \E k \in Key : ClientReadLocal(s,k)
   \/ \E s, t \in Server : GetEntries(s, t)
   \/ \E s, t \in Server : RollbackEntries(s, t)
   \/ \E s \in Server : \E Q \in Quorums(Server) : BecomeLeader(s, Q)
@@ -295,6 +317,11 @@ StateMachineSafety ==
     (c1.entry.index = c2.entry.index) => (c1.entry = c2.entry)
 
 \* For all k, latestRead for k is last committed write to k.
-LinearizableReads == 
-  latestRead = [ k \in Key |-> MaxCommitted(committed,k) ]
+ConsistentReads == 
+  \/ /\ ConsistencyLevel = "Linearizable"
+     /\ latestRead = [ k \in Key |-> MaxCommitted(committed,k) ]
+  \/ /\ ConsistencyLevel = "ReadYourWrites"
+     /\ \A k \in Key: LET lastWrite == MaxCommitted(committed, k) IN 
+        /\ latestRead[k].term >= lastWrite.term 
+        /\ latestRead[k].index >= lastWrite.index
 =============================================================================
