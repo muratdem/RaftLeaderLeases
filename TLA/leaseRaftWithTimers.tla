@@ -202,7 +202,7 @@ BecomeLeader(i, voteQuorum) ==
   /\ UNCHANGED <<committed, log, replicationTimes, commitIndex, latestRead,
                  clock>>
 
-\* Leader 'i' commits its latest log entry.
+\* Leader 'i' commits some entries in its log.
 CommitEntry(i) ==
   /\ state[i] = Leader
   /\ Len(log[i]) > 0
