@@ -26,13 +26,19 @@ class ReadConcern(enum.Enum):
 
 
 @dataclass
+class Interval:
+    earliest: int
+    latest: int
+
+
+@dataclass
 class Write:
     """All writes are list-appends, to make linearizability checking easy."""
     key: int
     value: int
     """The value appended to the list associated with key."""
     term: int
-    ts: Timestamp
+    ts: Interval
     """Timestamp from originating primary's clock."""
     created_at_absolute_ts: Timestamp
     """Absolute timestamp when primary created this write."""
@@ -157,21 +163,26 @@ class _NodeClock:
     """One node's clock."""
 
     def __init__(self, cfg: DictConfig, prng: PRNG):
-        self.previous_ts: int = get_current_ts()
+        self.previous_ts: Interval = Interval(get_current_ts(),
+                                              get_current_ts() + cfg.max_clock_error)
         self.max_clock_error: int = cfg.max_clock_error
         self.prng = prng
 
-    def now(self) -> int:
+    def now(self) -> Interval:
         if self.max_clock_error > 0:
+            def epsilon() -> int:
+                return int(self.prng.uniform(0, self.max_clock_error))
+
             now = get_current_ts()
             # Return monotonically increasing, jittery timestamps.
-            next_ts = max(self.previous_ts, int(self.prng.uniform(
-                now - self.max_clock_error // 2,
-                now + self.max_clock_error // 2)))
+            next_ts = Interval(
+                max(now - epsilon(), self.previous_ts.earliest + 1),
+                max(now + epsilon(), self.previous_ts.latest + 1),
+            )
             self.previous_ts = next_ts
             return next_ts
         else:
-            return int(get_current_ts())
+            return Interval(get_current_ts(), get_current_ts())
 
 
 _NOOP = -1
@@ -268,12 +279,12 @@ class Node:
                 now = self.clock.now()
                 primary_ids = self.monitor.primaries(
                     min_term=self.current_term,
-                    min_ts=now - self.election_timeout)
+                    min_ts=now.latest - self.election_timeout)
 
                 if primary_ids:
                     self._reset_election_deadline()
                 else:
-                    if self.election_deadline <= now:
+                    if self.election_deadline <= now.earliest:
                         _logger.info(f"{self} deadline {self.election_deadline} passed")
                         self.become_candidate()  # Resets election deadline.
 
@@ -289,7 +300,7 @@ class Node:
                 self.monitor.received_ping(node_id=sync_source.node_id,
                                            role=sync_source.role,
                                            term=sync_source.current_term,
-                                           ts=now)
+                                           ts=now.earliest)
                 if sync_source.current_term < self.current_term:
                     _logger.info(f"{sync_source} stepping down, {self} has higher term")
                     sync_source.stepdown()
@@ -348,7 +359,7 @@ class Node:
                 next_heartbeat = self.heartbeat_rate
                 primary_ids = self.monitor.primaries(
                     min_term=self.current_term,
-                    min_ts=self.clock.now() - self.election_timeout)
+                    min_ts=self.clock.now().latest - self.election_timeout)
                 if self.role is not Role.PRIMARY and not primary_ids:
                     # Try harder to find a primary.
                     next_heartbeat = self.heartbeat_rate // 10
@@ -374,7 +385,7 @@ class Node:
     def request_heartbeat(self, node_id: int, term: int, role: Role) -> None:
         """I received a heartbeat request."""
         self.monitor.received_ping(
-            node_id=node_id, role=role, term=term, ts=self.clock.now())
+            node_id=node_id, role=role, term=term, ts=self.clock.now().earliest)
         node = self.nodes[node_id]
         logging.debug(f"{self} got heartbeat from {node}")
         self._maybe_stepdown(term)
@@ -387,7 +398,7 @@ class Node:
     def reply_to_heartbeat(self, node_id: int, term: int, role: Role) -> None:
         """I received a heartbeat reply."""
         self.monitor.received_ping(
-            node_id=node_id, role=role, term=term, ts=self.clock.now())
+            node_id=node_id, role=role, term=term, ts=self.clock.now().earliest)
         node = self.nodes[node_id]
         logging.debug(f"{self} got heartbeat reply from {node}")
         self._maybe_stepdown(term)
@@ -491,7 +502,7 @@ class Node:
         self.monitor.received_ping(node_id=node_id,
                                    role=Role.SECONDARY,
                                    term=term,
-                                   ts=self.clock.now())
+                                   ts=self.clock.now().earliest)
 
         self._maybe_stepdown(term)
         if self.role is not Role.PRIMARY:
@@ -523,7 +534,7 @@ class Node:
     def update_commit_index(self, node_id: int, term: int, index: int):
         """I'm a secondary. The primary tells me its commit index."""
         self.monitor.received_ping(
-            node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now())
+            node_id=node_id, role=Role.PRIMARY, term=term, ts=self.clock.now().earliest)
         if self.role is not Role.SECONDARY:
             # I was elected while this message was in flight.
             return
@@ -535,13 +546,13 @@ class Node:
             return False
 
         if for_writes or not self.inherit_lease_enabled:
-            # Wait for past leader's lease to expire. Compensate for max_clock_error.
+            # Wait for past leader's lease to expire.
             prior_entry = next(
                 (e for e in reversed(self.log) if e.term != self.current_term), None)
 
             if prior_entry:
-                age = self.clock.now() - prior_entry.ts
-                if age <= self.lease_timeout + self.clock.max_clock_error:
+                if (prior_entry.ts.earliest + self.lease_timeout
+                    <= self.clock.now().latest):
                     # Previous leader still has write lease.
                     return False
         else:
@@ -550,10 +561,11 @@ class Node:
 
             # Raft guarantees this, but not MongoDB. We follow Raft in this case.
             assert self.commit_index < len(self.log)
+            # We need a committed entry less than lease_timeout old, in *any* term.
             # "Inherited read lease" means this primary can serve reads before it gets a
-            # lease, while a prior primary's lease is valid. No max_clock_error here.
-            age = self.clock.now() - self.log[self.commit_index].ts
-            if age > self.lease_timeout:
+            # lease, while a prior primary's lease is valid.
+            max_age = self.clock.now().latest - self.log[self.commit_index].ts.earliest
+            if max_age >= self.lease_timeout:
                 return False
 
         return True
@@ -680,6 +692,8 @@ class Node:
                 self.stepdown()
                 return True
 
+        return False
+
     def stepdown(self):
         """Tell this node to become secondary."""
         if self.role is Role.PRIMARY:
@@ -688,7 +702,7 @@ class Node:
 
     def _reset_election_deadline(self):
         self.election_deadline = (
-            self.clock.now() + self.election_timeout
+            self.clock.now().latest + self.election_timeout
             + self.prng.randint(0, self.prng._one_way_latency_mean * 2 * self.node_id))
 
     def __str__(self) -> str:
