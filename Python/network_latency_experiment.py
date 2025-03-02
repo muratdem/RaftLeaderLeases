@@ -3,29 +3,11 @@ import logging
 import os.path
 import time
 
-from client import ClientLogEntry
 from params import BASE_PARAMS
 from run_with_params import main_coro
 from simulate import get_event_loop
 
 _logger = logging.getLogger("experiment")
-
-
-def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
-    writes, reads = 0, 0
-    write_time, read_time = 0, 0
-    for entry in client_log:
-        if entry.op_type == ClientLogEntry.OpType.ListAppend:
-            writes += 1
-            write_time += entry.duration
-        elif entry.op_type == ClientLogEntry.OpType.Read:
-            reads += 1
-            read_time += entry.duration
-        else:
-            assert False, "unknown op type"
-
-    metrics["write_latency"] = write_time / writes if writes else None
-    metrics["read_latency"] = read_time / reads if reads else None
 
 
 def main():
@@ -44,13 +26,20 @@ def main():
         "seed": 1,
     })
 
-    for latency in range(100, 501, 100):
-        for lease_enabled in [True, False]:
+    for lease_enabled, quorum_check, title in [
+        (False, True, "quorum"),
+        (False, False, "inconsistent"),
+        (True, False, "lease"),
+    ]:
+        for latency_ms in range(1, 11):
             params = raw_params.copy()
             params.update({
-                "one_way_latency_mean": latency,
-                "one_way_latency_variance": 2 * latency,
+                "one_way_latency_mean": 1000 * latency_ms, # Convert ms to micros.
+                "one_way_latency_variance": 1000 * latency_ms,
+                "quorum_check_enabled": quorum_check,
                 "lease_enabled": lease_enabled,
+                "inherit_lease_enabled": False,  # Irrelevant.
+                "defer_commit_enabled": False,  # Irrelevant.
             })
 
             start = time.monotonic()

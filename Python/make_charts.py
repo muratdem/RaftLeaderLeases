@@ -2,6 +2,7 @@ import logging
 
 import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -11,33 +12,38 @@ _logger = logging.getLogger("chart")
 
 def chart_network_latency():
     csv = pd.read_csv("metrics/network_latency_experiment.csv")
-    df_no_lease = csv[csv["lease_enabled"] == False]
+    df_inconsistent = csv[
+        (csv["lease_enabled"] == False) & (csv["quorum_check_enabled"] == False)]
     df_lease = csv[csv["lease_enabled"] == True]
+    df_quorum_check = csv[csv["quorum_check_enabled"] == True]
 
-    BARWIDTH = 6
-    LINEWIDTH = 2
+    BARWIDTH = .1
+    LINEWIDTH = .01
     fig, ax = plt.subplots(figsize=(5, 3))
-    ax.set(xlabel="one-way network latency (μs)")
+    ax.set(xlabel="one-way network latency (ms)")
     ax.tick_params(axis="x", bottom=False)
+    ax.xaxis.set_major_locator(plt.MultipleLocator(1))
 
-    for offset, color, df, column in [
-        (-2, "C1", df_no_lease, "write_latency"),
-        (-1, "C0", df_no_lease, "read_latency"),
-        (1, "C1", df_lease, "write_latency"),
-        (2, "C0", df_lease, "read_latency"),
-    ]:
-        is_zeros = (df[column] == 0).all()
-        rects = ax.bar(
-            df["one_way_latency_mean"] + offset * (BARWIDTH + LINEWIDTH * 2),
-            df[column],
+    # x-offset, color, config_name, df, operation_type
+    combos = [
+        (-2.5, "C1", "inconsistent", df_inconsistent, "write_latency"),
+        (-1.5, "C0", "inconsistent", df_inconsistent, "read_latency"),
+        (-0.5, "C1", "lease", df_lease, "write_latency"),
+        (0.5, "C0", "lease", df_lease, "read_latency"),
+        (1.5, "C1", "quorum", df_quorum_check, "write_latency"),
+        (2.5, "C0", "quorum", df_quorum_check, "read_latency"),
+    ]
+
+    for offset, color, config_name, df, operation_type in combos:
+        column = f"{operation_type}_p90"
+        ax.bar(
+            df["one_way_latency_mean"] / 1000 + offset * (BARWIDTH + LINEWIDTH * 2),
+            np.maximum(df[column] / 1000, 0.25),  # If zero, set a min height.
             BARWIDTH,
-            label=column,
+            label=operation_type,
             color=color,
             edgecolor=color,
             linewidth=LINEWIDTH)
-
-        if is_zeros:
-            ax.bar_label(rects, padding=3)
 
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.5, .95),
@@ -45,16 +51,19 @@ def chart_network_latency():
                handles=[Patch(color=color) for color in ["C1", "C0"]],
                handleheight=0.65,
                handlelength=0.65,
-               labels=["write latency", "read latency"])
-    ax.text(df_no_lease["one_way_latency_mean"].min() - 3 * BARWIDTH - 2 * LINEWIDTH,
-            df_no_lease["write_latency"].min() + 50,
-            r"$\leftarrow$ no lease",
+               labels=["write latency p90", "read latency p90"],
+               frameon=False)
+
+    ymin = df_quorum_check["write_latency_p90"].min() / 1000
+    for i in range(0, len(combos), 2):
+        offset, color, config_name, df, operation_type = combos[i]
+        ax.text(
+            df["one_way_latency_mean"].min() / 1000 + offset * (BARWIDTH + LINEWIDTH * 6),
+            ymin + 1,
+            rf"$\leftarrow$ {config_name}",
             rotation="vertical")
-    ax.text(df_lease["one_way_latency_mean"].min() + BARWIDTH + LINEWIDTH,
-            df_lease["write_latency"].min() + 50,
-            r"$\leftarrow$ lease",
-            rotation="vertical")
-    fig.text(0.002, 0.55, "microseconds", va="center", rotation="vertical")
+
+    fig.text(0.002, 0.55, "milliseconds", va="center", rotation="vertical")
 
     # Remove chart borders
     for spine in ax.spines.values():

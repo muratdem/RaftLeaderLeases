@@ -20,6 +20,7 @@ BASE_PARAMS = DictConfig({
     "heal_rate": None,  # Mean time to heal a partition, exponentially distributed.
     "keyspace_size": 5,  # Number of keys. Reads/writes choose keys at random.
     "zipf_skewness": 1,  # Zipfian distro "a" param, read/write access skewness.
+    "quorum_check_enabled": False,  # Whether to check quorum before reading.
     "lease_enabled": True,
     "inherit_lease_enabled": True,
     "defer_commit_enabled": True,

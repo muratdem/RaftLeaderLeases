@@ -2,6 +2,7 @@ import logging
 import time
 import sys
 
+import numpy as np
 from omegaconf import DictConfig
 
 from client import ClientLogEntry, client_read, client_write
@@ -188,20 +189,20 @@ def do_linearizability_check(client_log: list[ClientLogEntry]) -> None:
 
 
 def save_metrics(metrics: dict, client_log: list[ClientLogEntry]):
-    writes, reads = 0, 0
-    write_time, read_time = 0, 0
+    write_durations, read_durations = [], []
+
     for entry in client_log:
         if entry.op_type == ClientLogEntry.OpType.ListAppend:
-            writes += 1
-            write_time += entry.duration
+            write_durations.append(entry.duration)
         elif entry.op_type == ClientLogEntry.OpType.Read:
-            reads += 1
-            read_time += entry.duration
+            read_durations.append(entry.duration)
         else:
             assert False, "unknown op type"
 
-    metrics["write_latency"] = write_time / writes if writes else None
-    metrics["read_latency"] = read_time / reads if reads else None
+    metrics["write_latency_p90"] = (
+        np.percentile(write_durations, 90) if write_durations else None)
+    metrics["read_latency_p90"] = (
+        np.percentile(read_durations, 90) if read_durations else None)
 
 
 async def main_coro(params: DictConfig, jumpstart_election=False) -> dict:

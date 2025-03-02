@@ -158,6 +158,9 @@ class _Monitor:
         return [node_id for node_id, p in self.pings.items()
                 if p.term >= min_term and p.ts >= min_ts and p.role == Role.PRIMARY]
 
+    def ping_timestamps(self) -> list[Timestamp]:
+        return [p.ts for p in self.pings.values()]
+
 
 class _NodeClock:
     """One node's clock."""
@@ -196,12 +199,22 @@ class Node:
                  prng: PRNG,
                  network: Network,
                  clock=None):
+        if cfg.quorum_check_enabled:
+            assert not cfg.lease_enabled, "Quorum check and leases are incompatible"
+        if cfg.lease_enabled:
+            assert not cfg.quorum_check_enabled, "Lease & quorum check are incompatible"
+        if cfg.defer_commit_enabled:
+            assert cfg.lease_enabled, "defer_commit_enabled requires leases"
+        if cfg.inherit_lease_enabled:
+            assert cfg.lease_enabled, "inherit_lease_enabled requires leases"
+
         self.node_id = node_id
         self.role = Role.SECONDARY
         self.prng = prng
         self.clock = _NodeClock(cfg, prng) if clock is None else clock
         self.network = network
         self.monitor = _Monitor()
+        self.quorum_check_enabled: bool = cfg.quorum_check_enabled
         self.lease_enabled: bool = cfg.lease_enabled
         self.inherit_lease_enabled = cfg.inherit_lease_enabled
         self.defer_commit_enabled = cfg.defer_commit_enabled
@@ -659,7 +672,7 @@ class Node:
                else self.log[:self.commit_index + 1])
         execution_ts = get_current_ts()
 
-        if concern is ReadConcern.LINEARIZABLE and not self.lease_enabled:
+        if concern is ReadConcern.LINEARIZABLE and self.quorum_check_enabled:
             # Commit a noop.
             self._write_internal(key=_NOOP, value=_NOOP)
             noop_index = len(self.log) - 1
