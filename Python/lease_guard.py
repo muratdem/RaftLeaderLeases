@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from typing import Callable, Collection, Union
 
 from omegaconf import DictConfig
+from pandas import Interval
 
 from prob import PRNG
 from simulate import Timestamp, get_current_ts, get_event_loop, sleep
@@ -27,8 +28,14 @@ class ReadConcern(enum.Enum):
 
 @dataclass
 class Interval:
-    earliest: int
-    latest: int
+    earliest: Timestamp
+    latest: Timestamp
+
+    def __add__(self, other: Timestamp) -> Interval:
+        return Interval(self.earliest + other, self.latest + other)
+
+    def __sub__(self, other: Timestamp) -> Interval:
+        return Interval(self.earliest - other, self.latest - other)
 
 
 @dataclass
@@ -179,13 +186,19 @@ class _NodeClock:
             now = get_current_ts()
             # Return monotonically increasing, jittery timestamps.
             next_ts = Interval(
-                max(now - epsilon(), self.previous_ts.earliest + 1),
-                max(now + epsilon(), self.previous_ts.latest + 1),
+                max(now - epsilon(), self.previous_ts.earliest),
+                max(now + epsilon(), self.previous_ts.latest),
             )
             self.previous_ts = next_ts
             return next_ts
         else:
             return Interval(get_current_ts(), get_current_ts())
+
+    def is_past(self, ts: Interval) -> bool:
+        return ts.latest < self.now().earliest
+
+    def is_future(self, ts: Interval) -> bool:
+        return ts.earliest > self.now().latest
 
 
 _NOOP = -1
@@ -563,11 +576,11 @@ class Node:
             prior_entry = next(
                 (e for e in reversed(self.log) if e.term != self.current_term), None)
 
-            if prior_entry:
-                if (prior_entry.ts.earliest + self.lease_timeout
-                    <= self.clock.now().latest):
-                    # Previous leader still has write lease.
-                    return False
+            if (prior_entry
+                    and not self.clock.is_past(prior_entry.ts + self.lease_timeout)):
+                # Previous leader still has write lease and defer_commit is disabled
+                # (otherwise write() doesn't call has_lease()).
+                return False
         else:
             if self.commit_index == -1:
                 return False
@@ -577,8 +590,8 @@ class Node:
             # We need a committed entry less than lease_timeout old, in *any* term.
             # "Inherited read lease" means this primary can serve reads before it gets a
             # lease, while a prior primary's lease is valid.
-            max_age = self.clock.now().latest - self.log[self.commit_index].ts.earliest
-            if max_age >= self.lease_timeout:
+            if not self.clock.is_future(
+                    self.log[self.commit_index].ts + self.lease_timeout):
                 return False
 
         return True

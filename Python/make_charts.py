@@ -159,15 +159,13 @@ def chart_unavailability():
     for i, df in enumerate(dfs):
         ax = axes[i]
         sub_exp_params = SUB_EXPERIMENT_PARAMS[i]
-        # Remove borders
-        for spine in ax.spines.values():
-            spine.set_visible(False)
 
         if len(df) > 0:
             for column in ["reads", "writes"]:
                 ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
                         df[column],
-                        label=column)
+                        label=column,
+                        linewidth=0.9)
                 ax.set_ylim(0, y_lim)
 
         # sub_exp_params are in microseconds, the x axis is in milliseconds.
@@ -188,31 +186,36 @@ def chart_unavailability():
                 color="purple",
                 linestyle="dotted")
 
-        ax.text(1.02, 0.5, sub_exp_params.title, va="center", ha="center",
+        ax.text(1.05, 0.5, sub_exp_params.title, va="center", ha="center",
                 rotation="vertical",
                 transform=ax.transAxes)
 
+    label_font_size = 10
     axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time / 1000 + 40,
                  int(y_lim * 0.85),
                  r"$\leftarrow$ leader crash",
                  color="red",
+                 fontsize=label_font_size,
                  bbox=dict(facecolor="white", edgecolor="none"))
     axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepup_time / 1000 + 40,
                  int(y_lim * 0.6),
                  r"$\leftarrow$ new leader elected",
-                 color="green")
-    axes[1].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
+                 color="green",
+                 fontsize=label_font_size)
+    axes[2].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
                   + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 - 40,
                  int(y_lim * 0.75),
                  r"old lease expires $\rightarrow$ ",
                  color="purple",
+                 fontsize=label_font_size,
                  bbox=dict(facecolor="white", edgecolor="none"),
                  horizontalalignment="right")
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.5, 1.005),
                ncol=2,
                handles=[Line2D([0], [0], color=color) for color in ["C1", "C0"]],
-               labels=["writes", "reads"])
+               labels=["writes", "reads"],
+               frameon=False)
     fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
