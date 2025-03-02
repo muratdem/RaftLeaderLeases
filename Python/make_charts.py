@@ -2,7 +2,6 @@ import logging
 
 import matplotlib.font_manager as font_manager
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
@@ -12,62 +11,115 @@ _logger = logging.getLogger("chart")
 
 def chart_network_latency():
     csv = pd.read_csv("metrics/network_latency_experiment.csv")
-    df_inconsistent = csv[
-        (csv["lease_enabled"] == False) & (csv["quorum_check_enabled"] == False)]
-    df_lease = csv[csv["lease_enabled"] == True]
-    df_quorum_check = csv[csv["quorum_check_enabled"] == True]
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, figsize=(5, 4))
 
-    BARWIDTH = .1
-    LINEWIDTH = .01
-    fig, ax = plt.subplots(figsize=(5, 3))
-    ax.set(xlabel="one-way network latency (ms)")
-    ax.tick_params(axis="x", bottom=False)
-    ax.xaxis.set_major_locator(plt.MultipleLocator(1))
+    ax3.set(xlabel="added one-way network latency (ms)")
 
-    # x-offset, color, config_name, df, operation_type
+    ax1.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
+    ax2.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
+    ax3.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
+
+    ax1.xaxis.set_major_locator(plt.NullLocator())
+    ax2.xaxis.set_major_locator(plt.NullLocator())
+    ax3.xaxis.set_major_locator(plt.MultipleLocator(1))
+
+    for ax in [ax1, ax2, ax3]:
+        ax.yaxis.grid(True, which='both', linestyle='--', linewidth=0.5)
+        ax.set_axisbelow(True)
+
+    # x-offset, color, config_name, df, operation_type, axes
     combos = [
-        (-2.5, "C1", "inconsistent", df_inconsistent, "write_latency"),
-        (-1.5, "C0", "inconsistent", df_inconsistent, "read_latency"),
-        (-0.5, "C1", "lease", df_lease, "write_latency"),
-        (0.5, "C0", "lease", df_lease, "read_latency"),
-        (1.5, "C1", "quorum", df_quorum_check, "write_latency"),
-        (2.5, "C0", "quorum", df_quorum_check, "read_latency"),
+        (-0.25, "C1", "inconsistent", "write_latency", ax1),
+        (0.25, "C0", "inconsistent", "read_latency", ax1),
+        (-0.25, "C1", "lease", "write_latency", ax2),
+        (0.25, "C0", "lease", "read_latency", ax2),
+        (-0.25, "C1", "quorum", "write_latency", ax3),
+        (0.25, "C0", "quorum", "read_latency", ax3),
     ]
 
-    for offset, color, config_name, df, operation_type in combos:
+    for offset, color, config_name, operation_type, ax in combos:
+        if config_name == "inconsistent":
+            df = csv[(csv["lease_enabled"] == False) & (
+                csv["quorum_check_enabled"] == False)]
+        elif config_name == "quorum":
+            df = csv[csv["quorum_check_enabled"] == True]
+        else:
+            df = csv[csv["lease_enabled"] == True]
+
         column = f"{operation_type}_p90"
+        hatch = "//" if "write" in operation_type else "xx"
+
+        # The x-axis "one_way_latency_mean" is the artificially added network latency.
+        x = df["one_way_latency_mean"] / 1000 + offset
+        # convert nanos to millis and ensure min height of 1
+        y = df[column].apply(lambda x: max(x / 1000, 0.25))
+        # Draw hatch only.
         ax.bar(
-            df["one_way_latency_mean"] / 1000 + offset * (BARWIDTH + LINEWIDTH * 2),
-            np.maximum(df[column] / 1000, 0.25),  # If zero, set a min height.
-            BARWIDTH,
-            label=operation_type,
-            color=color,
+            x,
+            y,
+            label=f"{config_name} {operation_type}",
+            color="none",
+            width=0.3,
             edgecolor=color,
-            linewidth=LINEWIDTH)
-
-    fig.legend(loc="upper center",
-               bbox_to_anchor=(0.5, .95),
-               ncol=2,
-               handles=[Patch(color=color) for color in ["C1", "C0"]],
-               handleheight=0.65,
-               handlelength=0.65,
-               labels=["write latency p90", "read latency p90"],
-               frameon=False)
-
-    ymin = df_quorum_check["write_latency_p90"].min() / 1000
-    for i in range(0, len(combos), 2):
-        offset, color, config_name, df, operation_type = combos[i]
+            hatch=hatch,
+            facecolor="none",
+            linewidth=0.5,
+            zorder=2,
+        )
+        # Draw the edge.
+        ax.bar(
+            x,
+            y,
+            color="none",
+            width=0.3,
+            edgecolor="black",
+            facecolor="none",
+            linewidth=0.5,
+            zorder=3,
+        )
+        # Add config_name to the upper left interior of each subplot
         ax.text(
-            df["one_way_latency_mean"].min() / 1000 + offset * (BARWIDTH + LINEWIDTH * 6),
-            ymin + 1,
-            rf"$\leftarrow$ {config_name}",
-            rotation="vertical")
+            0.02, 0.7, config_name,
+            transform=ax.transAxes,
+            verticalalignment='top',
+            horizontalalignment='left',
+            fontsize=12,
+        )
 
-    fig.text(0.002, 0.55, "milliseconds", va="center", rotation="vertical")
+    # Draw hatch only.
+    fig.legend(
+        loc="upper center",
+        ncol=2,
+        handles=[
+            Patch(
+                facecolor="none", edgecolor="C1", label="write latency", hatch="//",
+                linewidth=0.5
+            ),
+            Patch(
+                facecolor="none", edgecolor="C0", label="read latency", hatch="xx",
+                linewidth=0.5
+            ),
+        ],
+        frameon=False,
+    )
+    # Draw edges.
+    fig.legend(
+        loc="upper center",
+        ncol=2,
+        handles=[
+            Patch(
+                facecolor="none", edgecolor="black", label="write latency",
+                linewidth=0.5
+            ),
+            Patch(
+                facecolor="none", edgecolor="black", label="read latency", linewidth=0.5
+            ),
+        ],
+        frameon=False,
+        labelcolor="none",
+    )
 
-    # Remove chart borders
-    for spine in ax.spines.values():
-        spine.set_visible(False)
+    fig.text(0.002, 0.5, "milliseconds", va="center", rotation="vertical")
 
     fig.tight_layout()
     fig.subplots_adjust(top=0.9)
