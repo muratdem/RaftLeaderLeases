@@ -135,12 +135,14 @@ def chart_unavailability():
     fig, axes = plt.subplots(
         len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 5))
 
-    def resample_data(lease_enabled,
+    def resample_data(quorum_check_enabled,
+                      lease_enabled,
                       inherit_lease_enabled,
                       defer_commit_enabled,
                       **_):
         df_micros = csv[
-            (csv["lease_enabled"] == lease_enabled)
+            (csv["quorum_check_enabled"] == quorum_check_enabled)
+            & (csv["lease_enabled"] == lease_enabled)
             & (csv["inherit_lease_enabled"] == inherit_lease_enabled)
             & (csv["defer_commit_enabled"] == defer_commit_enabled)
             ].copy()
@@ -152,8 +154,7 @@ def chart_unavailability():
         return resampled[["reads", "writes"]].iloc[1:-1]
 
     dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
-    # Max read and write throughput spike in the final case, so use the middle case.
-    y_lim = 1.5 * dfs[2]["writes"].max()
+    y_lim = 2 * dfs[2]["reads"].max()
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, df in enumerate(dfs):
@@ -191,25 +192,21 @@ def chart_unavailability():
                 transform=ax.transAxes)
 
     label_font_size = 10
-    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepdown_time / 1000 + 40,
-                 int(y_lim * 0.85),
-                 r"$\leftarrow$ leader crash",
+    axes[0].text(510,
+                 17,
+                 "$\\leftarrow$ leader\n    crash",
                  color="red",
-                 fontsize=label_font_size,
-                 bbox=dict(facecolor="white", edgecolor="none"))
-    axes[0].text(SUB_EXPERIMENT_PARAMS[0].stepup_time / 1000 + 40,
-                 int(y_lim * 0.6),
-                 r"$\leftarrow$ new leader elected",
+                 fontsize=label_font_size)
+    axes[1].text(570,
+                 17,
+                 "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
-    axes[2].text((SUB_EXPERIMENT_PARAMS[0].stepdown_time
-                  + SUB_EXPERIMENT_PARAMS[0].lease_timeout) / 1000 - 40,
-                 int(y_lim * 0.75),
-                 r"old lease expires $\rightarrow$ ",
+    axes[2].text(1090,
+                 17,
+                 "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",
-                 fontsize=label_font_size,
-                 bbox=dict(facecolor="white", edgecolor="none"),
-                 horizontalalignment="right")
+                 fontsize=label_font_size)
     fig.legend(loc="upper center",
                bbox_to_anchor=(0.5, 1.005),
                ncol=2,

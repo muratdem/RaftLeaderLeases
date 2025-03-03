@@ -17,7 +17,7 @@ NUM_OPERATIONS = 6500
 # Long lease to explore inherited read lease optimization.
 LEASE_TIMEOUT = 2 * BASE_PARAMS.election_timeout
 # Ensure operations continue before, during, after lease interregnum.
-INTERARRIVAL = (LEASE_TIMEOUT * 3) // NUM_OPERATIONS
+INTERARRIVAL = 300  # microseconds
 # Replication is only a little faster than client write throughput, so we can see the
 # effect of the deferred commit optimization.
 LOG_WRITE_SPEED_RATIO = 0.7
@@ -113,7 +113,7 @@ async def experiment_coro(params: DictConfig) -> list[ClientLogEntry]:
     # Schedule operations at regular intervals. 66% reads, 33% writes.
     for i in range(int(params.operations)):
         start_ts += params.interarrival
-        jitter = prng.randint(-params.interarrival // 2, params.interarrival // 2)
+        jitter = prng.randint(-params.interarrival * 3, params.interarrival * 3)
         if i % 3 == 0:
             tasks.append(lp.create_task(name=f"writer {i}", coro=writer(
                 client_id=i,
@@ -159,6 +159,7 @@ def main():
             "main", experiment_coro(params=sub_exp_params)))
 
         stats = [{
+            "quorum_check_enabled": sub_exp_params.quorum_check_enabled,
             "lease_enabled": sub_exp_params.lease_enabled,
             "inherit_lease_enabled": sub_exp_params.inherit_lease_enabled,
             "defer_commit_enabled": sub_exp_params.defer_commit_enabled,

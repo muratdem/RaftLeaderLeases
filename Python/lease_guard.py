@@ -577,7 +577,7 @@ class Node:
                 (e for e in reversed(self.log) if e.term != self.current_term), None)
 
             if (prior_entry
-                    and not self.clock.is_past(prior_entry.ts + self.lease_timeout)):
+                and not self.clock.is_past(prior_entry.ts + self.lease_timeout)):
                 # Previous leader still has write lease and defer_commit is disabled
                 # (otherwise write() doesn't call has_lease()).
                 return False
@@ -591,7 +591,7 @@ class Node:
             # "Inherited read lease" means this primary can serve reads before it gets a
             # lease, while a prior primary's lease is valid.
             if not self.clock.is_future(
-                    self.log[self.commit_index].ts + self.lease_timeout):
+                self.log[self.commit_index].ts + self.lease_timeout):
                 return False
 
         return True
@@ -626,12 +626,10 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        while (self.lease_enabled
-               and not self.defer_commit_enabled
-               and not self.has_lease(for_writes=True)):
-            await sleep(_BUSY_WAIT)
-            if self.role is not Role.PRIMARY:
-                raise Exception("Stepped down while waiting for lease")
+        if (self.lease_enabled
+            and not self.defer_commit_enabled
+            and not self.has_lease(for_writes=True)):
+            raise Exception("Not leaseholder")
 
         self._write_internal(key=key, value=value)
         write_index = len(self.log) - 1
