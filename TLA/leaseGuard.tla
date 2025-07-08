@@ -10,7 +10,7 @@ VARIABLE clock
 \* For invariant-checking:
 VARIABLE committed, latestRead
 Entry == [term: Int, key: Key, index: Int, timestamp: Int]
-\* MongoDB-specific: leader tracks followers' terms.
+\* leader tracks followers' terms.
 FollowerIndex == [term: Int, index: Int]
 \* For checking LeaderCompleteness.
 CommitRecord == [committedInTerm: Int, entry: Entry]
@@ -118,8 +118,7 @@ ClientRead(i, k) ==
                  committed, commitIndex, clock>>
 
 \* Node 'i' gets a new log entry from node 'j'.
-\* This follows Raft: j's term >= i's term. MongoDB doesn't require this, see
-\* "Fault-Tolerant Replication with Pull-Based Consensus in MongoDB" Section 3.3.
+\* j's term >= i's term.
 GetEntries(i, j) ==
   /\ state[i] = Follower
   /\ Len(log[j]) > Len(log[i])
@@ -200,7 +199,7 @@ CommitEntry(i) ==
             x \in Max({1, commitIndex[i]})..newCommitIdx} IN
       \* The entry was written by this leader.
       /\ topNewCommitEntry.term = currentTerm[i]
-      \* Most nodes have this log entry. MongoDB checks the term, not Raft.
+      \* Most nodes have this log entry.
       /\ \E q \in Quorums(Server) : \A s \in q :
         /\ matchIndex[i][s].index >= newCommitIdx
         /\ matchIndex[i][s].term = currentTerm[i]

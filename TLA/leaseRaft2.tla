@@ -1,6 +1,6 @@
 ---- MODULE leaseRaft2 ----
 \*
-\* Basic, static version of MongoDB Raft protocol.
+\* Basic, static version of Raft protocol.
 \*
 
 EXTENDS Naturals, Integers, FiniteSets, Sequences, TLC

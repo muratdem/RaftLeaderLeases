@@ -517,8 +517,7 @@ class Node:
     def _update_commit_index(self, index: int) -> None:
         """Primary advances index, or secondary receives primary's index."""
         self.commit_index = max(self.commit_index, index)
-        # A MongoDB secondary can learn of a commit index higher than it has replicated.
-        # NOTE: this follows MongoDB, whereas our TLA+ follows Raft.
+        # A secondary can learn of a commit index higher than it has replicated.
         start_i = min(len(self.log) - 1, self.commit_index)
         # Reverse-iter, mark when entries became visible to rc:majority on this node.
         # This info is used to check linearizability.
@@ -591,7 +590,6 @@ class Node:
             if self.commit_index == -1:
                 return False
 
-            # Raft guarantees this, but not MongoDB. We follow Raft in this case.
             assert self.commit_index < len(self.log)
             # We need a committed entry less than lease_timeout old, in *any* term.
             # "Inherited read lease" means this primary can serve reads before it gets a
