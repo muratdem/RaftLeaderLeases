@@ -31,10 +31,10 @@ def chart_network_latency():
     combos = [
         (-0.25, "C1", "inconsistent", "write_latency", ax1),
         (0.25, "C0", "inconsistent", "read_latency", ax1),
-        (-0.25, "C1", "lease", "write_latency", ax2),
-        (0.25, "C0", "lease", "read_latency", ax2),
-        (-0.25, "C1", "quorum", "write_latency", ax3),
-        (0.25, "C0", "quorum", "read_latency", ax3),
+        (-0.25, "C1", "quorum", "write_latency", ax2),
+        (0.25, "C0", "quorum", "read_latency", ax2),
+        (-0.25, "C1", "lease", "write_latency", ax3),
+        (0.25, "C0", "lease", "read_latency", ax3),
     ]
 
     for offset, color, config_name, operation_type, ax in combos:
@@ -52,7 +52,7 @@ def chart_network_latency():
         # The x-axis "one_way_latency_mean" is the artificially added network latency.
         x = df["one_way_latency_mean"] / 1000 + offset
         # convert nanos to millis and ensure min height of 1
-        y = df[column].apply(lambda x: max(x / 1000, 0.25))
+        y = df[column].apply(lambda x: max(x / 1000, 1))
         # Draw hatch only.
         ax.bar(
             x,
@@ -92,11 +92,11 @@ def chart_network_latency():
         ncol=2,
         handles=[
             Patch(
-                facecolor="none", edgecolor="C1", label="write latency", hatch="//",
+                facecolor="none", edgecolor="C1", label="write latency p90", hatch="//",
                 linewidth=0.5
             ),
             Patch(
-                facecolor="none", edgecolor="C0", label="read latency", hatch="xx",
+                facecolor="none", edgecolor="C0", label="read latency p90", hatch="xx",
                 linewidth=0.5
             ),
         ],
@@ -108,22 +108,21 @@ def chart_network_latency():
         ncol=2,
         handles=[
             Patch(
-                facecolor="none", edgecolor="black", label="write latency",
+                facecolor="none", edgecolor="black", label="write latency p90",
                 linewidth=0.5
             ),
             Patch(
-                facecolor="none", edgecolor="black", label="read latency", linewidth=0.5
+                facecolor="none", edgecolor="black", label="read latency p90",
+                linewidth=0.5
             ),
         ],
         frameon=False,
         labelcolor="none",
     )
 
-    fig.text(0.002, 0.5, "milliseconds", va="center", rotation="vertical")
-
     fig.tight_layout()
     fig.subplots_adjust(top=0.9)
-    chart_path = "metrics/network_latency_experiment.pdf"
+    chart_path = "metrics/network_latency_experiment_simulation.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
@@ -149,7 +148,7 @@ def chart_unavailability():
 
         df_micros.sort_values(by=["end_ts"], inplace=True)
         df_micros["timestamp"] = pd.to_datetime(df_micros["end_ts"], unit="us")
-        resampled = df_micros.resample("10ms", on="timestamp").sum()
+        resampled = df_micros.resample("10ms", on="timestamp").sum() / 10
         # Remove first and last rows, which have low throughput due to artifacts.
         return resampled[["reads", "writes"]].iloc[1:-1]
 
@@ -193,17 +192,17 @@ def chart_unavailability():
 
     label_font_size = 10
     axes[0].text(510,
-                 17,
+                 1.7,
                  "$\\leftarrow$ leader\n    crash",
                  color="red",
                  fontsize=label_font_size)
     axes[1].text(570,
-                 17,
+                 1.7,
                  "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
     axes[2].text(1090,
-                 17,
+                 1.7,
                  "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",
                  fontsize=label_font_size)
@@ -216,7 +215,7 @@ def chart_unavailability():
     fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
-    chart_path = "metrics/unavailability_experiment.pdf"
+    chart_path = "metrics/unavailability_experiment_simulation.pdf"
     fig.savefig(chart_path, bbox_inches="tight", pad_inches=0)
     _logger.info(f"Created {chart_path}")
 
