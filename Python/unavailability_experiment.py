@@ -33,7 +33,7 @@ PARAMS.update({
     "heartbeat_rate": LEASE_TIMEOUT // 2,
     "operations": NUM_OPERATIONS,
     # Ensure operations continue before, during, after lease interregnum.
-    "interarrival": 300,
+    "interarrival": INTERARRIVAL,
     # SSD I/O latency.
     "log_write_micros": 250,
     "keyspace_size": 1000,

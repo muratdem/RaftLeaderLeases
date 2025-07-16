@@ -256,7 +256,8 @@ class Node:
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
         get_event_loop().create_task("heartbeat", self.heartbeat())
-        get_event_loop().create_task("commit index", self.commit_index_updater())
+        if self.lease_enabled:
+            get_event_loop().create_task("commit index", self.commit_index_updater())
 
     async def noop_writer(self):
         """Write a periodic noop. Ensures lease extension for readonly workloads.
