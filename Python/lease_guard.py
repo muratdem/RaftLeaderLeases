@@ -169,7 +169,18 @@ class _Monitor:
         return [p.ts for p in self.pings.values()]
 
 
-class _NodeClock:
+class ClockBase:
+    def now(self) -> Interval:
+        raise NotImplementedError
+
+    def is_past(self, ts: Interval) -> bool:
+        return ts.latest < self.now().earliest
+
+    def is_future_or_equal(self, ts: Interval) -> bool:
+        return ts.earliest >= self.now().latest
+
+
+class _NodeClock(ClockBase):
     """One node's clock."""
 
     def __init__(self, cfg: DictConfig, prng: PRNG):
@@ -193,12 +204,6 @@ class _NodeClock:
             return next_ts
         else:
             return Interval(get_current_ts(), get_current_ts())
-
-    def is_past(self, ts: Interval) -> bool:
-        return ts.latest < self.now().earliest
-
-    def is_future(self, ts: Interval) -> bool:
-        return ts.earliest > self.now().latest
 
 
 _NOOP = -1
@@ -591,8 +596,8 @@ class Node:
             # We need a committed entry less than lease_timeout old, in *any* term.
             # "Inherited read lease" means this primary can serve reads before it gets a
             # lease, while a prior primary's lease is valid.
-            if not self.clock.is_future(
-                self.log[self.commit_index].ts + self.lease_timeout):
+            if not self.clock.is_future_or_equal(
+                    self.log[self.commit_index].ts + self.lease_timeout):
                 return False
 
         return True

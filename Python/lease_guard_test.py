@@ -8,7 +8,13 @@ from omegaconf import DictConfig
 
 from client import client_read, client_write
 from run_with_params import ClientLogEntry, do_linearizability_check
-from lease_guard import Network, Node, ReadConcern, Role, setup_logging
+from lease_guard import (ClockBase,
+                         Interval,
+                         Network,
+                         Node,
+                         ReadConcern,
+                         Role,
+                         setup_logging)
 from prob import PRNG
 from simulate import get_current_ts, get_event_loop, sleep
 
@@ -65,9 +71,10 @@ TEST_CFG = DictConfig({
     "heal_rate": 1000,
     "keyspace_size": 1,
     "zipf_skewness": 4,
+    "quorum_check_enabled": False,
     "lease_enabled": False,
-    "inherit_lease_enabled": True,
-    "defer_commit_enabled": True,
+    "inherit_lease_enabled": False,
+    "defer_commit_enabled": False,
     "log_write_micros": None,
     "lease_timeout": 1000,
     "seed": 1,
@@ -167,13 +174,15 @@ class LeaseRaftTest(SimulatorTestCase):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.LINEARIZABLE,
                                                expected_result=[1],
-                                               lease_enabled=True)
+                                               lease_enabled=True,
+                                               lease_timeout=10000)
 
     async def test_read_concern_majority_upholds_linearizability(self):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.MAJORITY,
                                                expected_result=[1],
-                                               lease_enabled=True)
+                                               lease_enabled=True,
+                                               lease_timeout=10000)
 
     async def test_has_lease(self):
         await self.replica_set_setup(lease_enabled=True,
@@ -199,6 +208,8 @@ class LeaseRaftTest(SimulatorTestCase):
     async def test_read_with_prior_leader_lease(self):
         # Lease timeout > election timeout, so we have a stale leaseholder.
         await self.replica_set_setup(lease_enabled=True,
+                                     inherit_lease_enabled=True,
+                                     defer_commit_enabled=True,
                                      election_timeout=1000,
                                      lease_timeout=20000)
         primary_A = await self.get_primary()
@@ -251,7 +262,9 @@ class LeaseRaftTest(SimulatorTestCase):
                                      inherit_lease_enabled=True,
                                      defer_commit_enabled=True,
                                      election_timeout=1000,
-                                     lease_timeout=20000)
+                                     lease_timeout=20000,
+                                     one_way_latency_mean=100,
+                                     one_way_latency_variance=0)
         primary_A = await self.get_primary()
 
         await self.write(primary_A, key=0, value=0)
@@ -264,6 +277,7 @@ class LeaseRaftTest(SimulatorTestCase):
         primary_B = await self.get_primary(secondaries)
         self.assertIsNot(primary_A, primary_B)
         self.assertEqual(primary_A.role, Role.PRIMARY)
+        self.assertLess(primary_B.commit_index, primary_A.commit_index)
 
         # Key 2 hasn't been written on B, we can read it.
         self.assertEqual(await self.read(primary_B, 2), [])
@@ -272,7 +286,7 @@ class LeaseRaftTest(SimulatorTestCase):
             "read 0", primary_B.read(key=0, concern=ReadConcern.LINEARIZABLE))
         # Start writing - primary_B can't commit and acknowledge yet.
         write_key_0_task = get_event_loop().create_task(
-            "0+=1", primary_B.write(key=0, value=2))
+            "0+=2", primary_B.write(key=0, value=2))
         write_key_2_task = get_event_loop().create_task(
             "2+=0", primary_B.write(key=2, value=0))
         # Although we've started to write key 2, we can still read the prior term value.
@@ -387,17 +401,20 @@ class LeaseRaftTest(SimulatorTestCase):
     async def test_clock_error_compensation(self):
         # Test that commit lease uses max_clock_error, but not read lease.
         cfg = copy.deepcopy(TEST_CFG)
+        cfg.lease_enabled = True
+        cfg.inherit_lease_enabled = True
         cfg.lease_timeout = 10 * 1000
         prng = PRNG(cfg=cfg)
         network = Network(prng=prng, node_ids=[1, 2, 3])
 
-        class Clock:
+        class Clock(ClockBase):
             def __init__(self, offset: int):
                 self.offset = offset
                 self.max_clock_error = abs(offset)
 
-            def now(self) -> int:
-                return get_current_ts() + self.offset
+            def now(self) -> Interval:
+                ts = get_current_ts()
+                return Interval(ts + self.offset, ts + self.offset)
 
         clock1 = Clock(0)
         clock2 = Clock(-1000)  # Node 2, aka "B", has a slow clock.
@@ -491,6 +508,7 @@ class LeaseRaftTest(SimulatorTestCase):
         self.assertEqual(A.role, Role.SECONDARY)
         self.assertEqual(C.role, Role.PRIMARY)
 
+        await await_predicate(lambda: B.has_lease(for_writes=True))
         await self.write(B, key=0, value=2)
         await sleep(1)  # Distinguish write & read timestamps for linearizability check.
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
