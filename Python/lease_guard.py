@@ -218,13 +218,13 @@ class Node:
                  network: Network,
                  clock=None):
         if cfg.quorum_check_enabled:
-            assert not cfg.lease_enabled, "Quorum check and leases are incompatible"
-        if cfg.lease_enabled:
+            assert not cfg.leaseguard_enabled, "Quorum check and leases are incompatible"
+        if cfg.leaseguard_enabled:
             assert not cfg.quorum_check_enabled, "Lease & quorum check are incompatible"
         if cfg.defer_commit_enabled:
-            assert cfg.lease_enabled, "defer_commit_enabled requires leases"
+            assert cfg.leaseguard_enabled, "defer_commit_enabled requires leases"
         if cfg.inherit_lease_enabled:
-            assert cfg.lease_enabled, "inherit_lease_enabled requires leases"
+            assert cfg.leaseguard_enabled, "inherit_lease_enabled requires leases"
 
         self.node_id = node_id
         self.role = Role.SECONDARY
@@ -233,7 +233,7 @@ class Node:
         self.network = network
         self.monitor = _Monitor()
         self.quorum_check_enabled: bool = cfg.quorum_check_enabled
-        self.lease_enabled: bool = cfg.lease_enabled
+        self.leaseguard_enabled: bool = cfg.leaseguard_enabled
         self.inherit_lease_enabled = cfg.inherit_lease_enabled
         self.defer_commit_enabled = cfg.defer_commit_enabled
         self.lease_timeout: int = cfg.lease_timeout
@@ -261,7 +261,7 @@ class Node:
         get_event_loop().create_task("no-op writer", self.noop_writer())
         get_event_loop().create_task("replication", self.replicate())
         get_event_loop().create_task("heartbeat", self.heartbeat())
-        if self.lease_enabled:
+        if self.leaseguard_enabled:
             get_event_loop().create_task("commit index", self.commit_index_updater())
 
     async def noop_writer(self):
@@ -541,7 +541,7 @@ class Node:
             return
 
         self.match_index[node_id] = log_index
-        if (self.lease_enabled
+        if (self.leaseguard_enabled
             and self.defer_commit_enabled
             and not self.has_lease(for_writes=True)):
             _logger.info(f"{self} pinning commit index until I have a lease")
@@ -632,7 +632,7 @@ class Node:
         if self.role is not Role.PRIMARY:
             raise Exception("Not primary")
 
-        if (self.lease_enabled
+        if (self.leaseguard_enabled
             and not self.defer_commit_enabled
             and not self.has_lease(for_writes=True)):
             raise Exception("Not leaseholder")
@@ -659,13 +659,13 @@ class Node:
             raise Exception("Not primary")
 
         if (concern is not ReadConcern.LOCAL
-            and self.lease_enabled
+            and self.leaseguard_enabled
             and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
 
         awaited_limbo_read = 0
         if (concern is ReadConcern.LINEARIZABLE
-            and self.lease_enabled
+            and self.leaseguard_enabled
             and self.inherit_lease_enabled):
             # Limbo-read guard for inherited lease.
             while True:

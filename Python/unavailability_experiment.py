@@ -42,7 +42,7 @@ PARAMS.update({
 })
 
 SUB_EXPERIMENT_PARAMS = []
-for quorum_check_enabled, lease_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
+for quorum_check_enabled, leaseguard_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
     (False, False, False, False, "inconsistent"),
     (True, False, False, False, "quorum"),
     (False, True, False, False, "lease"),
@@ -52,7 +52,7 @@ for quorum_check_enabled, lease_enabled, inherit_lease_enabled, defer_commit_ena
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
         "quorum_check_enabled": quorum_check_enabled,
-        "lease_enabled": lease_enabled,
+        "leaseguard_enabled": leaseguard_enabled,
         "inherit_lease_enabled": inherit_lease_enabled,
         "defer_commit_enabled": defer_commit_enabled,
         "title": title,
@@ -160,7 +160,7 @@ def main():
 
         stats = [{
             "quorum_check_enabled": sub_exp_params.quorum_check_enabled,
-            "lease_enabled": sub_exp_params.lease_enabled,
+            "leaseguard_enabled": sub_exp_params.leaseguard_enabled,
             "inherit_lease_enabled": sub_exp_params.inherit_lease_enabled,
             "defer_commit_enabled": sub_exp_params.defer_commit_enabled,
             "end_ts": entry.end_ts,

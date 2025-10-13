@@ -26,7 +26,7 @@ def main():
         "seed": 1,
     })
 
-    for lease_enabled, quorum_check, title in [
+    for leaseguard_enabled, quorum_check, title in [
         (False, True, "quorum"),
         (False, False, "inconsistent"),
         (True, False, "lease"),
@@ -37,7 +37,7 @@ def main():
                 "one_way_latency_mean": 1000 * latency_ms, # Convert ms to micros.
                 "one_way_latency_variance": 1000 * latency_ms,
                 "quorum_check_enabled": quorum_check,
-                "lease_enabled": lease_enabled,
+                "leaseguard_enabled": leaseguard_enabled,
                 "inherit_lease_enabled": False,  # Irrelevant.
                 "defer_commit_enabled": False,  # Irrelevant.
             })

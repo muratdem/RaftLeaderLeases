@@ -39,12 +39,12 @@ def chart_network_latency():
 
     for offset, color, config_name, operation_type, ax in combos:
         if config_name == "inconsistent":
-            df = csv[(csv["lease_enabled"] == False) & (
+            df = csv[(csv["leaseguard_enabled"] == False) & (
                 csv["quorum_check_enabled"] == False)]
         elif config_name == "quorum":
             df = csv[csv["quorum_check_enabled"] == True]
         else:
-            df = csv[csv["lease_enabled"] == True]
+            df = csv[csv["leaseguard_enabled"] == True]
 
         column = f"{operation_type}_p90"
         hatch = "//" if "write" in operation_type else "xx"
@@ -135,13 +135,13 @@ def chart_unavailability():
         len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 5))
 
     def resample_data(quorum_check_enabled,
-                      lease_enabled,
+                      leaseguard_enabled,
                       inherit_lease_enabled,
                       defer_commit_enabled,
                       **_):
         df_micros = csv[
             (csv["quorum_check_enabled"] == quorum_check_enabled)
-            & (csv["lease_enabled"] == lease_enabled)
+            & (csv["leaseguard_enabled"] == leaseguard_enabled)
             & (csv["inherit_lease_enabled"] == inherit_lease_enabled)
             & (csv["defer_commit_enabled"] == defer_commit_enabled)
             ].copy()
@@ -179,7 +179,7 @@ def chart_unavailability():
             x=(sub_exp_params.stepup_time) / 1000,
             color="green",
             linestyle="dotted")
-        if sub_exp_params.lease_enabled:
+        if sub_exp_params.leaseguard_enabled:
             # Old lease expires.
             ax.axvline(
                 x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,

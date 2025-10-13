@@ -21,7 +21,7 @@ BASE_PARAMS = DictConfig({
     "keyspace_size": 5,  # Number of keys. Reads/writes choose keys at random.
     "zipf_skewness": 1,  # Zipfian distro "a" param, read/write access skewness.
     "quorum_check_enabled": False,  # Whether to check quorum before reading.
-    "lease_enabled": True,
+    "leaseguard_enabled": True,
     "inherit_lease_enabled": True,
     "defer_commit_enabled": True,
     "lease_timeout": 500 * 1000,  # Half a second.
