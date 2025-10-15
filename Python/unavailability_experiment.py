@@ -45,9 +45,9 @@ SUB_EXPERIMENT_PARAMS = []
 for quorum_check_enabled, leaseguard_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
     (False, False, False, False, "inconsistent"),
     (True, False, False, False, "quorum"),
-    (False, True, False, False, "lease"),
+    (False, True, False, False, "log-based\nlease"),
     (False, True, False, True, "defer\ncommit"),
-    (False, True, True, True, "inherit\nlease"),
+    (False, True, True, True, "LeaseGuard"),
 ]:
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
