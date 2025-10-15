@@ -42,21 +42,31 @@ PARAMS.update({
 })
 
 SUB_EXPERIMENT_PARAMS = []
-for quorum_check_enabled, leaseguard_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
-    (False, False, False, False, "inconsistent"),
-    (True, False, False, False, "quorum"),
-    (False, True, False, False, "lease"),
-    (False, True, False, True, "defer\ncommit"),
-    (False, True, True, True, "inherit\nlease"),
+for quorum_check_enabled, ongaro_lease_enabled, leaseguard_enabled, inherit_lease_enabled, defer_commit_enabled, title in [
+    (False, False, False, False, False, "inconsistent"),
+    (True, False, False, False, False, "quorum"),
+    (False, True, False, False, False, "Ongaro\nlease"),
+    (False, False, True, False, False, "LeaseGuard"),
+    (False, False, True, False, True, "defer\ncommit"),
+    (False, False, True, True, True, "inherit\nlease"),
 ]:
     sub_exp_params = PARAMS.copy()
     sub_exp_params.update({
         "quorum_check_enabled": quorum_check_enabled,
+        "ongaro_lease_enabled": ongaro_lease_enabled,
         "leaseguard_enabled": leaseguard_enabled,
         "inherit_lease_enabled": inherit_lease_enabled,
         "defer_commit_enabled": defer_commit_enabled,
         "title": title,
     })
+
+    if ongaro_lease_enabled:
+        # Since Ongaro lease has no separate lease_timeout, set the election_timeout
+        # to the value we normally use for lease_timeout.
+        sub_exp_params["election_timeout"] = PARAMS["lease_timeout"]
+        sub_exp_params["stepup_time"] = \
+            LEASE_TIMEOUT // 2 + sub_exp_params["election_timeout"]
+
     SUB_EXPERIMENT_PARAMS.append(sub_exp_params)
 
 
@@ -160,6 +170,7 @@ def main():
 
         stats = [{
             "quorum_check_enabled": sub_exp_params.quorum_check_enabled,
+            "ongaro_lease_enabled": sub_exp_params.ongaro_lease_enabled,
             "leaseguard_enabled": sub_exp_params.leaseguard_enabled,
             "inherit_lease_enabled": sub_exp_params.inherit_lease_enabled,
             "defer_commit_enabled": sub_exp_params.defer_commit_enabled,

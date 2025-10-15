@@ -218,13 +218,19 @@ class Node:
                  network: Network,
                  clock=None):
         if cfg.quorum_check_enabled:
-            assert not cfg.leaseguard_enabled, "Quorum check and leases are incompatible"
+            assert not cfg.leaseguard_enabled and not cfg.ongaro_lease_enabled, \
+                "Quorum check and leases are incompatible"
+        if cfg.ongaro_lease_enabled:
+            assert not cfg.leaseguard_enabled, \
+                "Ongaro leases and LeaseGuard are incompatible"
         if cfg.leaseguard_enabled:
+            assert not cfg.ongaro_lease_enabled, \
+                "LeaseGuard and Ongaro leases are incompatible"
             assert not cfg.quorum_check_enabled, "Lease & quorum check are incompatible"
         if cfg.defer_commit_enabled:
-            assert cfg.leaseguard_enabled, "defer_commit_enabled requires leases"
+            assert cfg.leaseguard_enabled, "defer_commit_enabled requires LeaseGuard"
         if cfg.inherit_lease_enabled:
-            assert cfg.leaseguard_enabled, "inherit_lease_enabled requires leases"
+            assert cfg.leaseguard_enabled, "inherit_lease_enabled requires LeaseGuard"
 
         self.node_id = node_id
         self.role = Role.SECONDARY
@@ -233,6 +239,7 @@ class Node:
         self.network = network
         self.monitor = _Monitor()
         self.quorum_check_enabled: bool = cfg.quorum_check_enabled
+        self.ongaro_lease_enabled: bool = cfg.ongaro_lease_enabled
         self.leaseguard_enabled: bool = cfg.leaseguard_enabled
         self.inherit_lease_enabled = cfg.inherit_lease_enabled
         self.defer_commit_enabled = cfg.defer_commit_enabled
@@ -622,6 +629,14 @@ class Node:
             if self.role is not Role.PRIMARY:
                 raise Exception("Stepped down while waiting for w:majority")
 
+    def _check_ongaro_lease(self):
+        if self.ongaro_lease_enabled:
+            tss = sorted(self.monitor.ping_timestamps()) + [self.clock.now().earliest]
+            majority_ts = tss[len(tss) // 2]
+            # Ongaro leases use election_timeout. Ignore lease_timeout & clock bounds.
+            if majority_ts <= self.clock.now().earliest - self.election_timeout:
+                raise Exception("Not leaseholder")
+
     async def write(self, key: int, value: int) -> Timestamp:
         """Append value to the list associated with key.
 
@@ -637,6 +652,7 @@ class Node:
             and not self.has_lease(for_writes=True)):
             raise Exception("Not leaseholder")
 
+        self._check_ongaro_lease()
         self._write_internal(key=key, value=value)
         write_index = len(self.log) - 1
         start_ts = get_current_ts()
@@ -663,6 +679,7 @@ class Node:
             and not self.has_lease(for_writes=False)):
             raise Exception("Not leaseholder")
 
+        self._check_ongaro_lease()
         awaited_limbo_read = 0
         if (concern is ReadConcern.LINEARIZABLE
             and self.leaseguard_enabled

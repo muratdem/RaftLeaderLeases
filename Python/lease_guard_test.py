@@ -72,6 +72,7 @@ TEST_CFG = DictConfig({
     "keyspace_size": 1,
     "zipf_skewness": 4,
     "quorum_check_enabled": False,
+    "ongaro_lease_enabled": False,
     "leaseguard_enabled": False,
     "inherit_lease_enabled": False,
     "defer_commit_enabled": False,
@@ -170,7 +171,14 @@ class LeaseRaftTest(SimulatorTestCase):
                                            expected_result=[],
                                            leaseguard_enabled=False)
 
-    async def test_rc_linearizable_is_linearizable_with_lease(self):
+    async def test_rc_linearizable_is_linearizable_with_ongaro_lease(self):
+        with self.assertRaisesRegex(Exception, r"Not leaseholder"):
+            await self.read_from_stale_primary(concern=ReadConcern.LINEARIZABLE,
+                                               expected_result=[1],
+                                               ongaro_lease_enabled=True,
+                                               lease_timeout=10000)
+
+    async def test_rc_linearizable_is_linearizable_with_leaseguard(self):
         with self.assertRaisesRegex(Exception, r"Not leaseholder"):
             await self.read_from_stale_primary(concern=ReadConcern.LINEARIZABLE,
                                                expected_result=[1],
@@ -183,6 +191,18 @@ class LeaseRaftTest(SimulatorTestCase):
                                                expected_result=[1],
                                                leaseguard_enabled=True,
                                                lease_timeout=10000)
+
+    async def test_ongaro_lease(self):
+        await self.replica_set_setup(ongaro_lease_enabled=True, noop_rate=1e10)
+        primary = await self.get_primary()
+        secondaries = set(n for n in self.nodes.values() if n.role == Role.SECONDARY)
+        primary._check_ongaro_lease()  # No exception.
+        await sleep(self.cfg.election_timeout)
+        primary._check_ongaro_lease()
+        self.network.make_partition([primary], secondaries)
+        await sleep(self.cfg.election_timeout)
+        self.assertRaisesRegex(Exception, r"Not leaseholder",
+                               primary._check_ongaro_lease)
 
     async def test_has_lease(self):
         await self.replica_set_setup(leaseguard_enabled=True,

@@ -11,19 +11,21 @@ _logger = logging.getLogger("chart")
 
 def chart_network_latency():
     csv = pd.read_csv("metrics/network_latency_experiment.csv")
-    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, sharex=True, figsize=(5, 4))
+    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, sharex=True, figsize=(5, 6))
 
-    ax3.set(xlabel="added one-way network latency (ms)")
+    ax4.set(xlabel="added one-way network latency (ms)")
 
     ax1.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
     ax2.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
     ax3.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
+    ax4.yaxis.set_major_locator(plt.FixedLocator([0, 10, 20]))
 
     ax1.xaxis.set_major_locator(plt.NullLocator())
     ax2.xaxis.set_major_locator(plt.NullLocator())
-    ax3.xaxis.set_major_locator(plt.MultipleLocator(1))
+    ax3.xaxis.set_major_locator(plt.NullLocator())
+    ax4.xaxis.set_major_locator(plt.MultipleLocator(1))
 
-    for ax in [ax1, ax2, ax3]:
+    for ax in [ax1, ax2, ax3, ax4]:
         ax.yaxis.grid(True, which='both', linestyle='--', linewidth=0.5)
         ax.set_axisbelow(True)
 
@@ -33,18 +35,25 @@ def chart_network_latency():
         (0.25, "C0", "inconsistent", "read_latency", ax1),
         (-0.25, "C1", "quorum", "write_latency", ax2),
         (0.25, "C0", "quorum", "read_latency", ax2),
-        (-0.25, "C1", "lease", "write_latency", ax3),
-        (0.25, "C0", "lease", "read_latency", ax3),
+        (-0.25, "C1", "Ongaro lease", "write_latency", ax3),
+        (0.25, "C0", "Ongaro lease", "read_latency", ax3),
+        (-0.25, "C1", "LeaseGuard", "write_latency", ax4),
+        (0.25, "C0", "LeaseGuard", "read_latency", ax4),
     ]
 
     for offset, color, config_name, operation_type, ax in combos:
         if config_name == "inconsistent":
             df = csv[(csv["leaseguard_enabled"] == False) & (
+                csv["ongaro_lease_enabled"] == False) & (
                 csv["quorum_check_enabled"] == False)]
         elif config_name == "quorum":
             df = csv[csv["quorum_check_enabled"] == True]
-        else:
+        elif config_name == "Ongaro lease":
+            df = csv[csv["ongaro_lease_enabled"] == True]
+        elif config_name == "LeaseGuard":
             df = csv[csv["leaseguard_enabled"] == True]
+        else:
+            raise ValueError(f"Unknown config_name: {config_name}")
 
         column = f"{operation_type}_p90"
         hatch = "//" if "write" in operation_type else "xx"
@@ -132,15 +141,17 @@ def chart_unavailability():
 
     csv = pd.read_csv("metrics/unavailability_experiment.csv")
     fig, axes = plt.subplots(
-        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 5))
+        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 6))
 
     def resample_data(quorum_check_enabled,
+                      ongaro_lease_enabled,
                       leaseguard_enabled,
                       inherit_lease_enabled,
                       defer_commit_enabled,
                       **_):
         df_micros = csv[
             (csv["quorum_check_enabled"] == quorum_check_enabled)
+            & (csv["ongaro_lease_enabled"] == ongaro_lease_enabled)
             & (csv["leaseguard_enabled"] == leaseguard_enabled)
             & (csv["inherit_lease_enabled"] == inherit_lease_enabled)
             & (csv["defer_commit_enabled"] == defer_commit_enabled)
@@ -201,7 +212,7 @@ def chart_unavailability():
                  "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
-    axes[2].text(1090,
+    axes[3].text(1090,
                  1.7,
                  "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",

@@ -26,10 +26,11 @@ def main():
         "seed": 1,
     })
 
-    for leaseguard_enabled, quorum_check, title in [
-        (False, True, "quorum"),
-        (False, False, "inconsistent"),
-        (True, False, "lease"),
+    for leaseguard_enabled, ongaro_lease_enabled, quorum_check, title in [
+        (False, False, True, "quorum"),
+        (False, False, False, "inconsistent"),
+        (False, True, False, "ongarolease"),
+        (True, False, False, "leaseguard"),
     ]:
         for latency_ms in range(1, 11):
             params = raw_params.copy()
@@ -37,6 +38,7 @@ def main():
                 "one_way_latency_mean": 1000 * latency_ms, # Convert ms to micros.
                 "one_way_latency_variance": 1000 * latency_ms,
                 "quorum_check_enabled": quorum_check,
+                "ongaro_lease_enabled": ongaro_lease_enabled,
                 "leaseguard_enabled": leaseguard_enabled,
                 "inherit_lease_enabled": False,  # Irrelevant.
                 "defer_commit_enabled": False,  # Irrelevant.
