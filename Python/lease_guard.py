@@ -258,9 +258,13 @@ class Node:
     def initiate(self, nodes: dict[int, "Node"]):
         self.nodes = nodes.copy()
         self.match_index = {n.node_id: -1 for n in nodes.values()}
-        get_event_loop().create_task("no-op writer", self.noop_writer())
-        get_event_loop().create_task("replication", self.replicate())
-        get_event_loop().create_task("heartbeat", self.heartbeat())
+        for n in nodes.values():
+            get_event_loop().create_task(
+                f"{self.node_id} replicate to {n.node_id}",
+                self.replicate_to(n))
+        get_event_loop().create_task(f"{self.node_id} no-op writer", self.noop_writer())
+        get_event_loop().create_task(f"{self.node_id} heartbeat", self.heartbeat())
+        get_event_loop().create_task(f"{self.node_id} election", self.election())
         if self.leaseguard_enabled:
             get_event_loop().create_task("commit index", self.commit_index_updater())
 
@@ -299,81 +303,68 @@ class Node:
 
                 return
 
-    async def replicate(self):
+    async def replicate_to(self, other: "Node") -> None:
         """Eternal thread that replicates log entries."""
         try:
             self._reset_election_deadline()
             while True:
-                if self.role is not Role.SECONDARY:
+                if self.role is not Role.PRIMARY:
                     await sleep(_BUSY_WAIT)
                     continue
 
-                now = self.clock.now()
-                primary_ids = self.monitor.primaries(
-                    min_term=self.current_term,
-                    min_ts=now.latest - self.election_timeout)
+                start = self.clock.now()
 
-                if primary_ids:
-                    self._reset_election_deadline()
-                else:
-                    if self.election_deadline <= now.earliest:
-                        _logger.info(f"{self} deadline {self.election_deadline} passed")
-                        self.become_candidate()  # Resets election deadline.
-
-                    await sleep(_BUSY_WAIT)
-                    continue
-
-                sync_source = self.nodes[self.prng.choice(primary_ids)]
-                if not self.network.reachable(self.node_id, sync_source.node_id):
-                    logging.debug(f"{self} can't sync from {sync_source}, unreachable")
-                    await sleep(_BUSY_WAIT)
-                    continue
-
-                self.monitor.received_ping(node_id=sync_source.node_id,
-                                           role=sync_source.role,
-                                           term=sync_source.current_term,
-                                           ts=now.earliest)
-                if sync_source.current_term < self.current_term:
-                    _logger.info(f"{sync_source} stepping down, {self} has higher term")
-                    sync_source.stepdown()
-                    continue
-
-                self._maybe_rollback(sync_source)
-                commit_index = sync_source.commit_index
-                if len(self.log) >= len(sync_source.log):
-                    # Empty batch of entries, but we learn the source's commit index.
-                    await sleep(self.prng.one_way_latency_value())
-                    if self.role is Role.SECONDARY:
-                        self._update_commit_index(commit_index)
-                    continue
-
-                entry = sync_source.log[len(self.log)]
-                # Simulate waiting for entry to arrive. It may have arrived already.
-                apply_time = (
-                    entry.created_at_absolute_ts + self.prng.one_way_latency_value())
-                await sleep(max(0, apply_time - get_current_ts()))
-                if self.role is not Role.SECONDARY:
-                    # Elected while waiting.
-                    continue
-
-                self._update_commit_index(commit_index)
-                lag = get_current_ts() - entry.created_at_absolute_ts
-                _logger.debug(
-                    f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
-                self.log.append(entry.copy())
-                self.match_index[self.node_id] = len(self.log) - 1
-                self.network.send(self.node_id,
-                                  sync_source.update_secondary_position,
-                                  node_id=self.node_id,
-                                  term=self.current_term,
-                                  log_index=len(self.log) - 1)
-                self.metrics.update("replication_lag", lag)
-                if self.log_write_micros is not None:
-                    await sleep(self.log_write_micros)
-
-        except Exception as e:
+        except Exception as e:  # TODO: remove
             _logger.exception(e)
             raise
+
+    async def append_entries_reply(self, node_id: int, term: int) -> None:
+        """I received a reply to AppendEntries RPC."""
+        self.monitor.received_ping(node_id=node_id,
+                                   role=Role.SECONDARY,
+                                   term=term,
+                                   ts=self.clock.now().earliest)
+        self._maybe_stepdown(term)
+
+    async def append_entries(self,
+                             node_id: int,
+                             term: int,
+                             commit_index: int,
+                             entries: list[Write]) -> None:
+        """I'm a secondary, receiving an AppendEntries RPC."""
+        if self.role is not Role.SECONDARY:
+            return
+
+        self._reset_election_deadline()
+        sync_source = self.nodes[node_id]
+        now = self.clock.now()
+        self.monitor.received_ping(
+            node_id=node_id, role=Role.PRIMARY, term=term, ts=now.earliest)
+        self._update_commit_index(commit_index)
+        self._maybe_rollback(sync_source)
+        if len(self.log) >= len(sync_source.log):
+            # Empty batch of entries, but we learn the source's commit index.
+            self.network.send(self.node_id, sync_source.append_entries_reply,
+                              node_id=self.node_id, term=self.current_term)
+            return
+
+        entry = sync_source.log[len(self.log)]
+
+        self._update_commit_index(commit_index)
+        lag = get_current_ts() - entry.created_at_absolute_ts
+        _logger.debug(
+            f"{self} got entry {entry.key}+={entry.value}, lag {lag}")
+        self.log.append(entry.copy())
+        self.match_index[self.node_id] = len(self.log) - 1
+        self.network.send(self.node_id,
+                          sync_source.update_secondary_position,
+                          node_id=self.node_id,
+                          term=self.current_term,
+                          log_index=len(self.log) - 1)
+        self.metrics.update("replication_lag", lag)
+        if self.log_write_micros is not None:
+            await sleep(self.log_write_micros)
+
 
     async def heartbeat(self):
         """Send heartbeat requests to all peers."""
