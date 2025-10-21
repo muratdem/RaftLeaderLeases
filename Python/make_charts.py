@@ -157,7 +157,7 @@ def chart_unavailability():
     dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
     y_lim = 1.3 * dfs[2]["reads"].max()
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
-    label_font_size = 10
+    label_font_size = 12
 
     for i, df in enumerate(dfs):
         ax = axes[i]
@@ -215,12 +215,12 @@ def chart_unavailability():
                  "$\\leftarrow$ leader\n    crash",
                  color="red",
                  fontsize=label_font_size)
-    axes[1].text(600,
+    axes[1].text(560,
                  EVENT_LABEL_HEIGHT,
                  "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
-    axes[2].text(1130,
+    axes[2].text(1080,
                  EVENT_LABEL_HEIGHT,
                  "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",
