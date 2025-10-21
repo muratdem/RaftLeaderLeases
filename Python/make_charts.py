@@ -33,8 +33,8 @@ def chart_network_latency():
         (0.25, "C0", "inconsistent", "read_latency", ax1),
         (-0.25, "C1", "quorum", "write_latency", ax2),
         (0.25, "C0", "quorum", "read_latency", ax2),
-        (-0.25, "C1", "lease", "write_latency", ax3),
-        (0.25, "C0", "lease", "read_latency", ax3),
+        (-0.25, "C1", "LeaseGuard", "write_latency", ax3),
+        (0.25, "C0", "LeaseGuard", "read_latency", ax3),
     ]
 
     for offset, color, config_name, operation_type, ax in combos:
