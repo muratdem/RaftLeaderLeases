@@ -157,19 +157,34 @@ def chart_unavailability():
     dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
     y_lim = 1.3 * dfs[2]["reads"].max()
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
+    label_font_size = 10
 
     for i, df in enumerate(dfs):
         ax = axes[i]
         sub_exp_params = SUB_EXPERIMENT_PARAMS[i]
+        for column in ["reads", "writes"]:
+            ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
+                    df[column],
+                    label=column,
+                    linewidth=1.3)
+            ax.set_ylim(0, y_lim)
+            ax.set_xlim(100, 1900)
 
-        if len(df) > 0:
-            for column in ["reads", "writes"]:
-                ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
-                        df[column],
-                        label=column,
-                        linewidth=1.1)
-                ax.set_ylim(0, y_lim)
-                ax.set_xlim(100, 1900)
+        # Defer commit lets write throughput spike off the chart when old lease expires.
+        if sub_exp_params["defer_commit_enabled"] and len(df) > 0:
+            # Get the first off-chart value
+            off_chart_writes = df[df["writes"] > y_lim]
+            off_chart_value = off_chart_writes["writes"].iloc[0]
+            off_chart_time = (off_chart_writes.index[0]
+                              - pd.Timestamp(0)).total_seconds() * 1000
+            # Place text label just below the top of the subplot.
+            ax.text(off_chart_time - 65, y_lim + 800,
+                    f"off chart, {off_chart_value/1000:.0f}k ops/sec",
+                    ha="right", va="top",
+                    fontsize=label_font_size)
+            ax.text(off_chart_time - 75, y_lim + 500,
+                    r"$\searrow$",
+                    ha="left", va="top")
 
         # sub_exp_params are in microseconds, the x axis is in milliseconds.
         # Leader crash.
@@ -185,7 +200,8 @@ def chart_unavailability():
         if sub_exp_params.leaseguard_enabled:
             # Old lease expires.
             ax.axvline(
-                x=(sub_exp_params.stepdown_time + sub_exp_params.lease_timeout) / 1000,
+                x=(sub_exp_params.stepdown_time
+                   + sub_exp_params.lease_timeout) / 1000 - 35,
                 color="purple",
                 linestyle="dotted")
 
@@ -193,7 +209,6 @@ def chart_unavailability():
                 rotation="vertical",
                 transform=ax.transAxes)
 
-    label_font_size = 10
     EVENT_LABEL_HEIGHT = 1500
     axes[0].text(520,
                  EVENT_LABEL_HEIGHT,
@@ -205,7 +220,7 @@ def chart_unavailability():
                  "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
-    axes[2].text(1150,
+    axes[2].text(1130,
                  EVENT_LABEL_HEIGHT,
                  "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",
