@@ -133,7 +133,7 @@ def chart_unavailability():
 
     csv = pd.read_csv("metrics/unavailability_experiment.csv")
     fig, axes = plt.subplots(
-        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 5))
+        len(SUB_EXPERIMENT_PARAMS), 1, sharex=True, sharey=True, figsize=(5, 7))
 
     def resample_data(quorum_check_enabled,
                       leaseguard_enabled,
@@ -149,12 +149,13 @@ def chart_unavailability():
 
         df_micros.sort_values(by=["end_ts"], inplace=True)
         df_micros["timestamp"] = pd.to_datetime(df_micros["end_ts"], unit="us")
-        resampled = df_micros.resample("10ms", on="timestamp").sum() / 10
+        # 10ms moving average, then convert to seconds.
+        resampled = 1000 * df_micros.resample("10ms", on="timestamp").sum() / 10
         # Remove first and last rows, which have low throughput due to artifacts.
         return resampled[["reads", "writes"]].iloc[1:-1]
 
     dfs = [resample_data(**options) for options in SUB_EXPERIMENT_PARAMS]
-    y_lim = 2 * dfs[2]["reads"].max()
+    y_lim = 1.3 * dfs[2]["reads"].max()
     axes[-1].set(xlabel=r"time in milliseconds $\rightarrow$")
 
     for i, df in enumerate(dfs):
@@ -166,8 +167,9 @@ def chart_unavailability():
                 ax.plot((df.index - pd.Timestamp(0)).total_seconds() * 1000,
                         df[column],
                         label=column,
-                        linewidth=0.9)
+                        linewidth=1.1)
                 ax.set_ylim(0, y_lim)
+                ax.set_xlim(100, 1900)
 
         # sub_exp_params are in microseconds, the x axis is in milliseconds.
         # Leader crash.
@@ -192,28 +194,29 @@ def chart_unavailability():
                 transform=ax.transAxes)
 
     label_font_size = 10
-    axes[0].text(510,
-                 1.7,
+    EVENT_LABEL_HEIGHT = 1500
+    axes[0].text(520,
+                 EVENT_LABEL_HEIGHT,
                  "$\\leftarrow$ leader\n    crash",
                  color="red",
                  fontsize=label_font_size)
-    axes[1].text(570,
-                 1.7,
+    axes[1].text(600,
+                 EVENT_LABEL_HEIGHT,
                  "new leader\nelected    $\\rightarrow$",
                  color="green",
                  fontsize=label_font_size)
-    axes[2].text(1090,
-                 1.7,
+    axes[2].text(1150,
+                 EVENT_LABEL_HEIGHT,
                  "old lease\nexpires  $\\rightarrow$ ",
                  color="purple",
                  fontsize=label_font_size)
     fig.legend(loc="upper center",
-               bbox_to_anchor=(0.5, 1.005),
+               bbox_to_anchor=(0.5, 0.98),
                ncol=2,
                handles=[Line2D([0], [0], color=color) for color in ["C1", "C0"]],
                labels=["writes", "reads"],
                frameon=False)
-    fig.text(0.002, 0.5, "operations per millisecond", va="center", rotation="vertical")
+    fig.text(0.002, 0.5, "operations per second", va="center", rotation="vertical")
     fig.tight_layout()
     fig.subplots_adjust(hspace=0.4, top=0.92)
     chart_path = "metrics/unavailability_experiment_simulation.pdf"
